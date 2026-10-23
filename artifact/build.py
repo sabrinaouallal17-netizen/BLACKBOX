@@ -13,7 +13,7 @@ out = Path(sys.argv[1])
 html = (root / "index.html").read_text()
 css = (root / "styles.css").read_text()
 backend = (root / "artifact" / "backend.js").read_text()
-app = (root / "app.js").read_text()
+scripts = {name: (root / name).read_text() for name in ("icons.js", "ui.js", "app.js")}
 
 
 def inline_script(code):
@@ -25,8 +25,9 @@ firebase_scripts = re.compile(r'\s*<script src="https://www\.gstatic\.com/fireba
 assert len(firebase_scripts.findall(html)) == 3, "expected the three Firebase SDK scripts"
 html = firebase_scripts.sub("", html)
 html = html.replace('<script src="firebase-config.js"></script>', inline_script(backend))
-html = html.replace('<script src="app.js"></script>', inline_script(app))
-assert 'src="' not in re.sub(r"<svg.*?</svg>", "", html, flags=re.S), "a local script was not inlined"
+for name, code in scripts.items():
+    html = html.replace(f'<script src="{name}"></script>', inline_script(code))
+assert not re.search(r"<script[^>]+src=", html), "a script was not inlined"
 
 # The Artifact publisher adds its own document skeleton.
 html = re.sub(r"<!doctype html>\s*|</?html[^>]*>\s*|</?head>\s*|</?body>\s*", "", html, flags=re.I)

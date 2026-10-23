@@ -5,11 +5,21 @@ const path = require('path');
 const MOCK = path.join(__dirname, 'mock-claude.js');
 const errors = [];
 const ok = (c, m) => { if (!c) errors.push('FAIL: ' + m); else console.log('PASS:', m); };
+const blobs = new Map();
 
 (async () => {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
   await ctx.addInitScript({ path: MOCK });
+  await ctx.route('**/__mock_upload/*', async (route) => {
+    const id = route.request().url().split('/').pop();
+    blobs.set(id, { body: route.request().postDataBuffer(), type: route.request().headers()['content-type'] });
+    await route.fulfill({ status: 200, body: 'ok' });
+  });
+  await ctx.route('**/_blob/*', (route) => {
+    const b = blobs.get(route.request().url().split('/').pop());
+    return b ? route.fulfill({ status: 200, body: b.body, contentType: b.type }) : route.fulfill({ status: 404, body: '' });
+  });
   const open = async (u) => {
     const page = await ctx.newPage();
     page.on('pageerror', (e) => errors.push(`[${u}] pageerror: ${e.message}`));
@@ -18,10 +28,23 @@ const ok = (c, m) => { if (!c) errors.push('FAIL: ' + m); else console.log('PASS
     await page.goto(`${process.env.URL}?u=${u}`);
     return page;
   };
+  const png = async (page, color, w = 300, h = 360, label = '') => Buffer.from(await page.evaluate(([c, w, h, label]) => {
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    const g = cv.getContext('2d'); g.fillStyle = c; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#fff'; g.font = `bold ${Math.round(h / 7)}px sans-serif`; g.fillText(label, w * 0.12, h * 0.55);
+    return cv.toDataURL('image/png').split(',')[1];
+  }, [color, w, h, label]), 'base64');
+  const file = (name, buffer, mimeType = 'image/png') => ({ name, mimeType, buffer });
+  const choose = async (page, selector, files) => {
+    const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.click(selector)]);
+    await fc.setFiles(files);
+  };
+  const go = async (page, view, sel = '#view h1') => { await page.evaluate((h) => { location.hash = h; }, view); await page.waitForSelector(sel); };
   const confirmAsk = async (p, ...vals) => { for (let i = 0; i < vals.length; i++) await p.fill(`#ask-f${i}`, vals[i]); await p.click('#ask-ok'); };
   const titles = (p) => p.locator('.card').first().locator('tbody tr .task-title').allTextContents();
   const newTask = async (p, title) => { await p.click('[data-action=new-task] >> nth=0'); await p.fill('#task-title', title); await p.click('#task-form button[type=submit]'); await p.waitForSelector(`text=${title}`); };
-  const menu = async (p, title, item) => { await p.locator('tbody tr', { hasText: title }).locator('[data-menu]').click(); await p.click(`#task-menu [data-mi=${item}]`); };
+  const menu = async (p, title, item) => { await p.locator('tbody tr', { hasText: title }).locator('[data-task-menu]').click(); await p.locator('#popover button', { hasText: item }).click(); };
+  const pick = (p, label) => p.locator('#popover button', { hasText: label }).first().click();
 
   // Signed-out visitor
   const anon = await open('nobody');
@@ -31,24 +54,62 @@ const ok = (c, m) => { if (!c) errors.push('FAIL: ' + m); else console.log('PASS
   // Owner
   const A = await open('alice');
   await A.waitForSelector('text=Create a project');
-  ok(await A.locator('[data-action=sign-out], [data-action=account]').count() === 0, 'no sign-out or password UI in the Artifact');
+  ok(await A.locator('[data-action=sign-out]').count() === 0, 'no sign-out or password UI in the Artifact');
   await A.click('.welcome [data-action=new-project]'); await confirmAsk(A, 'Baddie Dice');
   await A.waitForSelector('#set-name');
-  await A.fill('#set-desc', 'Roll dice, collect rare characters.'); await A.fill('#set-platforms', 'Roblox'); await A.fill('#set-tags', 'RNG, Collection');
-  await A.click('[data-form=project] button'); await A.waitForSelector('text=Roll dice, collect rare characters.');
-  ok((await A.textContent('.meta')) === 'Baddie Dice · Roblox · RNG · Collection', 'project settings saved');
-  await A.click('a[data-view=overview]'); await A.waitForSelector('h1:text("Project overview")');
+  await A.fill('#set-desc', 'Roll dice, collect rare characters.');
+  await A.check('#plat-roblox', { force: true }); await A.check('#plat-pc', { force: true });
+  await A.fill('#tag-entry', 'RNG'); await A.press('#tag-entry', 'Enter');
+  await A.click('[data-form=project] button.primary'); await A.waitForSelector('text=Project saved');
+  await choose(A, '[data-pick=icon]', file('icon.png', await png(A, '#7c3aed', 256, 256, 'BD')));
+  await A.waitForSelector('.icon-pick img');
+  ok((await A.getAttribute('.icon-pick img', 'src')).startsWith('/_blob/'), 'icon stored in the artifact file storage');
+  await go(A, 'overview');
+  ok(JSON.stringify(await A.locator('.meta .plat-chip').allTextContents()) === '["Roblox","PC"]', 'platform chips');
+  ok(await A.locator('#side-nav .count').count() === 0, 'no counters in the navigation');
   for (const t of ['T1', 'T2', 'T3']) await newTask(A, t);
-  await menu(A, 'T3', 'up');
+  await menu(A, 'T3', 'Up');
   await A.waitForFunction(() => [...document.querySelectorAll('.card tbody tr .task-title')].map((e) => e.textContent).join() === 'T1,T3,T2');
   ok(true, 'menu Up reorders');
-  await menu(A, 'T2', 'delete'); await confirmAsk(A);
+  await menu(A, 'T2', 'Delete'); await confirmAsk(A);
   await A.waitForSelector('tbody tr:has-text("T2")', { state: 'detached' });
   ok(JSON.stringify(await titles(A)) === '["T1","T3"]', 'menu Delete removes');
-  await A.click('a[data-view=chat]'); await A.waitForSelector('#chat-text');
-  await A.fill('#chat-text', 'Hello team'); await A.press('#chat-text', 'Enter');
-  await A.waitForSelector('.msg-text:text("Hello team")');
-  ok((await A.textContent('.msg .from')).startsWith('Alice'), 'own name resolved from account');
+
+  // Collections with images
+  await A.click('[data-action=new-collection]'); await confirmAsk(A, 'Characters');
+  await A.waitForSelector('.coll-toolbar');
+  await choose(A, '[data-pick=items]', [file('Baddie One.png', await png(A, '#db2777', 300, 360, 'B1')), file('Baddie Two.png', await png(A, '#059669', 300, 360, 'B2'))]);
+  await A.waitForFunction(() => document.querySelectorAll('.item-card img').length === 2);
+  await A.waitForFunction(() => [...document.querySelectorAll('.item-card img')].every((i) => i.complete && i.naturalWidth > 0), null, { timeout: 10000 }).catch(() => {});
+  ok(await A.evaluate(() => [...document.querySelectorAll('.item-card img')].every((i) => i.complete && i.naturalWidth > 0)), 'item images load from file storage');
+  await A.click('[data-view-mode=list]'); await A.waitForSelector('.item-table');
+  ok(await A.locator('.item-table tbody tr').count() === 2, 'list view');
+  await A.click('[data-view-mode=grid]');
+
+  // Assets
+  await go(A, 'assets', '.assets-page');
+  await choose(A, '.dropzone[data-pick=asset]', [file('hero.png', await png(A, '#9333ea', 640, 360, 'HERO'))]);
+  await A.waitForSelector('.asset-card');
+  ok((await A.textContent('.asset-card .asset-name')) === 'hero.png', 'asset uploaded');
+
+  // Chat
+  await go(A, 'chat', '#chat-text');
+  await A.fill('#chat-text', 'Hello **team**'); await A.press('#chat-text', 'Enter');
+  await A.waitForSelector('.msg-text strong');
+  ok((await A.textContent('.msg-head b')) === 'Alice', 'own name resolved from account');
+  await choose(A, '[data-pick=chat]', [file('a.png', await png(A, '#0ea5e9', 400, 300, 'A')), file('b.png', await png(A, '#22c55e', 400, 300, 'B'))]);
+  await A.click('.send-btn');
+  await A.waitForFunction(() => document.querySelectorAll('.atts.multi .att-img img').length === 2);
+  ok(true, 'images sent in chat');
+
+  // Profile
+  await go(A, 'profile', '#prof-name');
+  await choose(A, '[data-pick=avatar]', file('me.png', await png(A, '#f97316', 300, 300, 'A')));
+  await A.waitForSelector('#side-user .avatar.photo img');
+  await A.fill('#prof-title', 'Lead developer'); await A.fill('#prof-email', 'alice@studio.test');
+  await A.click('[data-form=profile] button.primary');
+  await A.waitForSelector('#side-user >> text=Lead developer');
+  ok(true, 'profile photo, role and contact email saved');
 
   // Editor joins
   const B = await open('bob');
@@ -56,26 +117,31 @@ const ok = (c, m) => { if (!c) errors.push('FAIL: ' + m); else console.log('PASS
   ok((await B.textContent('#invites')).includes('Baddie Dice'), 'editor sees the project and a Join button');
   await B.click('[data-join]');
   await B.waitForSelector('[data-join]', { state: 'detached' });
-  await B.click('.side-label a[href="#team"]'); await B.waitForSelector('.people li:nth-child(2)');
-  ok((await B.textContent('.people')).includes('Alice') && (await B.textContent('.people')).includes('Bob'), 'team lists both, names from accounts');
+  await go(B, 'team', '.people li:nth-child(2)');
+  const team = await B.textContent('.people');
+  ok(team.includes('Alice') && team.includes('Bob') && team.includes('Lead developer') && team.includes('alice@studio.test'), "team shows names, Alice's role and contact email");
+  ok(await B.locator('.people .avatar.photo').count() === 1, "Bob sees Alice's photo");
   ok((await B.textContent('#view')).includes('Share'), 'team page explains inviting through Share');
-  ok(await B.locator('#invite-email').count() === 0, 'no email invite form in the Artifact');
-  await B.click('a[data-view=chat]'); await B.waitForSelector('text=Hello team');
+  await go(B, 'chat', '#chat-text');
+  await B.waitForSelector('text=Hello team');
   await B.fill('#chat-text', 'Hi Alice!'); await B.press('#chat-text', 'Enter');
+  await A.evaluate(() => { location.hash = 'chat'; });
   await A.waitForSelector('text=Hi Alice!');
   ok(true, 'chat syncs between viewers');
-  await A.click('.side-label a[href="#team"]'); await A.waitForSelector('.people li:nth-child(2)');
-  ok((await A.textContent('.people')).includes('bob@example.com'), 'owner sees member email from account');
 
   const stored = await A.evaluate(() => localStorage.getItem('mock:db'));
-  ok(!/"name":"(Alice|Bob)"/.test(stored), 'no names stored in the database, only ids');
+  ok(!/"name":"(Alice|Bob)"/.test(stored), 'account names are not copied into the database');
+
+  // Activity
+  await go(A, 'activity', '.act-list');
+  ok(await A.locator('.act-row').count() >= 8 && await A.locator('.act-row .act-badge').count() === await A.locator('.act-row').count(), 'activity log with an icon on every entry');
 
   // View-only viewer
   const V = await open('vera');
   V.expectWriteError = true;
   await V.waitForSelector('#invites .invite');
   ok((await V.textContent('#invites')).includes('You can view this workspace'), 'view-only banner');
-  await V.click('a[data-view=overview]'); await V.waitForSelector('text=T1');
+  await go(V, 'overview', 'text=T1');
   await V.click('[data-action=new-task] >> nth=0'); await V.fill('#task-title', 'Sneaky'); await V.click('#task-form button[type=submit]');
   await V.waitForSelector('.toast.error');
   ok((await V.textContent('.toast')).includes('share it with you as Editor'), 'view-only write refused with a clear message');
@@ -83,23 +149,22 @@ const ok = (c, m) => { if (!c) errors.push('FAIL: ' + m); else console.log('PASS
 
   // Mobile
   await A.setViewportSize({ width: 390, height: 844 });
-  for (const v of ['overview', 'chat', 'team']) {
-    await A.evaluate((h) => { location.hash = h; }, v); await A.waitForTimeout(300);
+  for (const v of ['overview', 'chat', 'team', 'assets', 'activity']) {
+    await go(A, v); await A.waitForTimeout(300);
     const w = await A.evaluate(() => document.documentElement.scrollWidth);
     ok(w <= 390, `mobile ${v} no horizontal scroll (${w})`);
   }
   await A.setViewportSize({ width: 1500, height: 950 });
-  await A.evaluate(() => { location.hash = 'overview'; }); await A.waitForTimeout(300);
+  await go(A, 'overview'); await A.waitForTimeout(300);
   await A.screenshot({ path: process.env.OUT + '/art-overview.png' });
-  await B.evaluate(() => { location.hash = 'team'; }); await B.waitForTimeout(300);
-  await B.screenshot({ path: process.env.OUT + '/art-team.png' });
 
   // Owner deletes the project
-  await A.evaluate(() => { location.hash = 'project'; }); await A.waitForSelector('[data-action=delete-project]');
+  await go(A, 'project', '[data-action=delete-project]');
   await A.click('[data-action=delete-project]'); await confirmAsk(A, 'Baddie Dice');
   await A.waitForSelector('text=Create a project');
   await B.waitForSelector('text=Create a project');
-  ok((await A.evaluate(() => localStorage.getItem('mock:db'))) === '{}', 'project and all its data deleted, other viewer updated');
+  const left = JSON.parse(await A.evaluate(() => localStorage.getItem('mock:db')));
+  ok(Object.keys(left).every((k) => k.startsWith('profiles/')), 'project and all its data deleted, profiles kept');
 
   await browser.close();
   console.log(errors.length ? '\n' + errors.join('\n') : '\nALL OK');

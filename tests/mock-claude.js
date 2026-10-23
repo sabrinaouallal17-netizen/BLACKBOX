@@ -80,5 +80,13 @@
       return [id, { id, name: p?.name || "", email: p?.email || null, avatarUrl: "", color: "#888", isMe: id === viewer?.id, guest: false }];
     })),
   };
-  window.claude = { use: async (name) => (name === "db" ? db : name === "user" ? (viewer ? user : null) : null) };
+  // File storage: bytes go to the test server (Playwright routes), which serves them at /_blob/<id>.
+  const assets = viewer?.write ? {
+    upload: async (blob) => {
+      const id = "a" + newId();
+      await fetch("/__mock_upload/" + id, { method: "POST", headers: { "content-type": blob.type || "application/octet-stream" }, body: blob });
+      return { id, url: "/_blob/" + id, sizeBytes: blob.size, contentType: blob.type };
+    },
+  } : null;
+  window.claude = { use: async (name) => (name === "db" ? db : name === "user" ? (viewer ? user : null) : name === "assets" ? assets : null) };
 })();

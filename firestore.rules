@@ -40,6 +40,12 @@ service cloud.firestore {
             || after.memberIds.toSet().hasAll(before.memberIds.toSet().difference([request.auth.uid].toSet())));
     }
 
+    // Profiles (photo, name, role, contact email) are visible to signed-in people; each person edits their own.
+    match /profiles/{uid} {
+      allow read: if signedIn();
+      allow write: if signedIn() && request.auth.uid == uid;
+    }
+
     match /projects/{projectId} {
       function project() {
         return get(/databases/$(database)/documents/projects/$(projectId)).data;
@@ -56,6 +62,12 @@ service cloud.firestore {
       match /tasks/{taskId} {
         allow read, write: if isMember(project());
       }
+      match /items/{itemId} {
+        allow read, write: if isMember(project());
+      }
+      match /assets/{assetId} {
+        allow read, write: if isMember(project());
+      }
       match /activity/{entryId} {
         allow read, delete: if isMember(project());
         allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid;
@@ -63,6 +75,8 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow read: if isMember(project());
         allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid;
+        allow update: if isMember(project()) && resource.data.uid == request.auth.uid
+          && request.resource.data.uid == resource.data.uid;
         allow delete: if isMember(project())
           && (resource.data.uid == request.auth.uid || project().ownerId == request.auth.uid);
       }

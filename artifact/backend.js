@@ -7,10 +7,10 @@ window.BLACKBOX_ARTIFACT = true;
 (function () {
   const runtime = (async () => {
     const use = (name) => (window.claude?.use ? window.claude.use(name).catch(() => null) : Promise.resolve(null));
-    const [db, user] = await Promise.all([use("db"), use("user")]);
-    return { db, user };
+    const [db, user, assets] = await Promise.all([use("db"), use("user"), use("assets")]);
+    return { db, user, assets };
   })();
-  let rt = { db: null, user: null };
+  let rt = { db: null, user: null, assets: null };
 
   /* ---------- Names, resolved from accounts at render time ---------- */
   const names = {};
@@ -20,6 +20,12 @@ window.BLACKBOX_ARTIFACT = true;
   let onNames = () => {};
   window.BB = {
     canWrite: null,
+    // Stores a file in the artifact's file storage. The id is the durable pointer; it serves at /_blob/<id>.
+    async upload(blob) {
+      if (!rt.assets) throw Object.assign(new Error("Uploads aren't available."), { code: "no_uploads" });
+      const up = await rt.assets.upload(blob);
+      return { url: "/_blob/" + up.id, id: up.id, sizeBytes: up.sizeBytes };
+    },
     name: (id) => names[id] || "",
     email: (id) => emails[id] || "",
     onNames(fn) { onNames = fn; },

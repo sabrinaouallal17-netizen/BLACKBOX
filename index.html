@@ -61,18 +61,16 @@
 
       <div class="side-section" id="project-picker">
         <div class="side-label">Project</div>
-        <div class="select-wrap">
-          <select id="project-select" aria-label="Project"></select>
-          <span class="select-caret" data-icon="chevron"></span>
-        </div>
+        <select id="project-select" aria-label="Project" data-cs-class="project-cs"></select>
       </div>
 
       <nav class="side-nav" id="side-nav">
         <a href="#overview" data-view="overview"><span data-icon="home"></span>Overview</a>
         <a href="#tasks" data-view="tasks"><span data-icon="check"></span>Tasks</a>
-        <a href="#bugs" data-view="bugs"><span data-icon="bug"></span>Bugs<span class="count" id="bugs-count">0</span></a>
+        <a href="#bugs" data-view="bugs"><span data-icon="bug"></span>Bugs</a>
+        <a href="#chat" data-view="chat"><span data-icon="chat"></span>Chat</a>
+        <a href="#assets" data-view="assets"><span data-icon="images"></span>Assets</a>
         <a href="#activity" data-view="activity"><span data-icon="pulse"></span>Activity</a>
-        <a href="#chat" data-view="chat"><span data-icon="chat"></span>Chat<span class="count" id="chat-count">0</span></a>
         <a href="#project" data-view="project"><span data-icon="sliders"></span>Project settings</a>
       </nav>
 
@@ -86,6 +84,7 @@
         <div class="avatar-stack" id="side-team"></div>
       </div>
 
+      <div class="save-status" id="save-status" role="status"></div>
       <div class="side-user" id="side-user"></div>
     </aside>
 
@@ -96,7 +95,9 @@
     </main>
   </div>
 
-  <div class="menu" id="task-menu" role="menu" hidden></div>
+  <div class="menu" id="popover" role="menu" hidden></div>
+  <div class="lightbox" id="lightbox" hidden></div>
+  <input type="file" id="file-picker" hidden>
   <div class="toast" id="toast" role="status" hidden></div>
 
   <dialog id="task-dialog">
@@ -130,6 +131,27 @@
     </form>
   </dialog>
 
+  <dialog id="item-dialog" class="wide-dialog">
+    <form id="item-form" data-drafts>
+      <h2 id="item-dialog-title">New item</h2>
+      <div class="item-form-grid">
+        <div>
+          <label class="image-pick" data-drop="item-image" title="Choose image"><input type="file" id="item-file" accept="image/*" hidden><div id="item-image-preview"></div></label>
+          <button type="button" class="link small" id="item-remove-image">Remove image</button>
+        </div>
+        <div class="item-fields">
+          <label>Name<input id="item-name" required maxlength="60" autocomplete="off"></label>
+          <label>Description<textarea id="item-desc" rows="5" maxlength="400"></textarea></label>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" id="item-cancel">Cancel</button>
+        <button type="submit" class="btn primary" id="item-save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="ask-dialog">
     <form id="ask-form">
       <h2 id="ask-title"></h2>
@@ -147,6 +169,8 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   <script src="firebase-config.js"></script>
+  <script src="icons.js"></script>
+  <script src="ui.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

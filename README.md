@@ -4,13 +4,18 @@ Une application pour gérer et planifier nos jeux en équipe : tâches, bugs, re
 
 ## Fonctionnalités
 
-- **Comptes** : inscription et connexion par email et mot de passe, confirmation de l'email obligatoire, mot de passe oublié
-- **Projets** : plusieurs projets ; nom, description, plateformes et tags modifiables ; suppression (propriétaire) ou départ (membre)
-- **Équipe** : invitation par email ; la personne voit l'invitation à sa connexion et l'accepte ou la refuse ; le propriétaire peut retirer des membres
-- **Tâches et bugs** : création, modification, suppression, filtres par statut et par membre ; menu ⋯ avec Edit / Up / Down / Delete pour réordonner
-- **Release** : checklist avec progression
-- **Collections** : listes d'assets (personnages, maps, icônes…)
-- **Activity** et **Chat** séparés, mis à jour en temps réel pour toute l'équipe
+- **Comptes** : inscription et connexion par email et mot de passe, confirmation de l'email, mot de passe oublié, changement d'email (confirmé par lien) et de mot de passe
+- **Profil** : photo, nom, rôle, email de contact, visibles par l'équipe
+- **Projets** : icône et miniature du jeu, description, plateformes avec icônes (Roblox, PC, Mac, mobile, consoles…), tags
+- **Équipe** : invitation par email, acceptation ou refus, retrait de membres par le propriétaire
+- **Tâches et bugs** : menu ⋯ (Edit / Up / Down / Delete), filtres par statut et par membre
+- **Chat façon Discord** : **gras**, *italique*, ~~barré~~, `code`, citations, plusieurs images par message (glisser-déposer, coller ou trombone), bibliothèque de GIF, modifier ou supprimer ses messages
+- **Assets** : images, miniatures, icônes et GIF de l'équipe, filtres, aperçu, « utiliser comme icône ou miniature »
+- **Collections** : éléments avec image, vue grille (image et infos sur la carte) ou liste ; déposer plusieurs images crée un élément par image
+- **Activity** : journal complet de toutes les modifications, avec une icône par type, filtres par type et par membre, et le détail des changements (Statut : To do → Done)
+- **Sauvegarde** : tout est enregistré en ligne et partagé en temps réel ; l'indicateur en bas de la barre latérale affiche « All changes saved », « Saving… » ou « Offline ». Un texte en cours de saisie n'est pas effacé quand un coéquipier modifie quelque chose.
+
+Dans la version GitHub (Firebase), les images sont compressées et stockées dans la base (GIF jusqu'à 600 Ko), sans Firebase Storage, qui demande un abonnement payant. La version Artifact accepte des fichiers jusqu'à 20 Mo.
 
 ## Mise en route (une seule fois, environ 5 minutes)
 
@@ -34,7 +39,7 @@ GitHub → **Settings → Pages** → Source **Deploy from a branch**, branche `
 
 Une deuxième édition tourne comme page Artifact sur claude.ai, sans Firebase : les comptes sont des comptes Claude et les données sont dans la base de la page. Le même `app.js` est utilisé ; `artifact/backend.js` remplace le SDK Firebase.
 
-- Construire la page : `python3 artifact/build.py blackbox.html`, puis la publier comme Artifact avec les capacités `db` et `user` (portée `profile`).
+- Construire la page : `python3 artifact/build.py blackbox.html`, puis la publier comme Artifact avec les capacités `db` (règle : chacun modifie son propre profil), `user` (portée `profile`) et `assets` (fichiers).
 - Inviter quelqu'un : menu **Share** de la page → invitation par email comme **Editor**. La personne ouvre le lien et clique **Join** sur le projet.
 - Toutes les personnes qui ont accès à la page voient tous les projets ; les accès en lecture seule ne peuvent rien modifier.
 - Test : `tests/artifact-e2e.js` avec la fausse plateforme `tests/mock-claude.js`.
@@ -69,7 +74,9 @@ PW=<chemin vers playwright> SDK=<chemin vers node_modules/firebase> OUT=/tmp nod
 
 - `index.html` : écrans (connexion, app, fenêtres)
 - `styles.css` : thème et mise en page responsive
-- `app.js` : rendu, navigation, Firebase (auth, données en temps réel)
+- `app.js` : pages, actions et données (Firebase ou Artifact)
+- `ui.js` : menus, listes déroulantes, fenêtres, aperçu d'images, mise en forme du chat, images
+- `icons.js` : icônes de l'interface et des plateformes
 - `firebase-config.js` : configuration du projet Firebase
 - `firestore.rules` : règles de sécurité de la base
 - `firebase.json` : configuration des émulateurs
