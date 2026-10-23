@@ -30,6 +30,15 @@ Les valeurs de `firebase-config.js` sont publiques par conception : ce sont les 
 
 GitHub → **Settings → Pages** → Source **Deploy from a branch**, branche `main`, dossier `/ (root)`. L'app est alors disponible sur `https://sabrinaouallal17-netizen.github.io/BLACKBOX/`.
 
+## Version Artifact (claude.ai)
+
+Une deuxième édition tourne comme page Artifact sur claude.ai, sans Firebase : les comptes sont des comptes Claude et les données sont dans la base de la page. Le même `app.js` est utilisé ; `artifact/backend.js` remplace le SDK Firebase.
+
+- Construire la page : `python3 artifact/build.py blackbox.html`, puis la publier comme Artifact avec les capacités `db` et `user` (portée `profile`).
+- Inviter quelqu'un : menu **Share** de la page → invitation par email comme **Editor**. La personne ouvre le lien et clique **Join** sur le projet.
+- Toutes les personnes qui ont accès à la page voient tous les projets ; les accès en lecture seule ne peuvent rien modifier.
+- Test : `tests/artifact-e2e.js` avec la fausse plateforme `tests/mock-claude.js`.
+
 ## Développement local
 
 Sans build ni dépendance pour l'app elle-même :
@@ -64,3 +73,4 @@ PW=<chemin vers playwright> SDK=<chemin vers node_modules/firebase> OUT=/tmp nod
 - `firebase-config.js` : configuration du projet Firebase
 - `firestore.rules` : règles de sécurité de la base
 - `firebase.json` : configuration des émulateurs
+- `artifact/` : édition Artifact (`backend.js`, `build.py`)

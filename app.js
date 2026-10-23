@@ -2,8 +2,10 @@
 
 /* ---------- Firebase setup ---------- */
 // ?emulator in the URL points the app at the local Firebase emulators (used for development and tests).
-const USE_EMULATOR = new URLSearchParams(location.search).has("emulator");
-const FB_CONFIG = USE_EMULATOR
+// The Artifact edition (artifact/backend.js) provides a Firebase-compatible layer over claude.ai accounts.
+const ARTIFACT = !!window.BLACKBOX_ARTIFACT;
+const USE_EMULATOR = !ARTIFACT && new URLSearchParams(location.search).has("emulator");
+const FB_CONFIG = ARTIFACT ? {} : USE_EMULATOR
   ? { apiKey: "demo-key", authDomain: "demo-blackbox.firebaseapp.com", projectId: "demo-blackbox" }
   : window.FIREBASE_CONFIG;
 let auth = null;
@@ -25,7 +27,9 @@ let subscribedId = null;
 let deletingId = null;      // project being deleted; its settings page shows progress   // project whose tasks/activity/messages are being listened to
 
 const project = () => projects[currentId] || null;
-const me = () => (user ? { uid: user.uid, name: user.displayName || user.email.split("@")[0], email: user.email.toLowerCase() } : null);
+const me = () => (user ? { uid: user.uid, name: user.displayName || (user.email || "").split("@")[0] || "You", email: (user.email || "").toLowerCase() } : null);
+// Name written into shared data. The Artifact edition stores only account ids and resolves names when rendering.
+const storedName = () => (ARTIFACT ? "" : me().name);
 
 /* ---------- Helpers ---------- */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -82,6 +86,10 @@ function friendlyError(e) {
     "auth/network-request-failed": "No connection to the server. Check your internet.",
     "permission-denied": "You don't have access to do that.",
     unavailable: "The server can't be reached right now. Changes will sync when you're back online.",
+    invalid_argument: "You can't change this workspace. Ask the owner to share it with you as Editor.",
+    quota_exceeded: "The workspace is full. Delete old tasks or messages to make room.",
+    revoked: "Your access to this page changed. Reload the page.",
+    "not-found": "This item no longer exists.",
   };
   return map[e?.code] || e?.message || "Something went wrong.";
 }
@@ -176,8 +184,14 @@ const PIXEL_PATTERNS = [
 function hash(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); }
 function memberName(uid) {
   if (uid && user && uid === user.uid) return me().name;
+  if (ARTIFACT) {
+    BB.want([uid]);
+    return BB.name(uid) || project()?.members?.[uid]?.name || "Someone";
+  }
   return project()?.members?.[uid]?.name || "Former member";
 }
+// Name for a row that stored its author's name at write time (activity, chat).
+const nameOf = (uid, stored) => (ARTIFACT ? memberName(uid) : stored || memberName(uid));
 function avatar(uid, size = 36, name = memberName(uid)) {
   const h = hash(uid || "none");
   const hue = h % 360;
@@ -207,7 +221,7 @@ const FV = () => firebase.firestore.FieldValue;
 function log(verb, target = "", where = "", detail = "") {
   if (!currentId) return;
   const m = me();
-  sub("activity").add({ uid: m.uid, name: m.name, verb, target, where, detail, at: Date.now() })
+  sub("activity").add({ uid: m.uid, name: storedName(), verb, target, where, detail, at: Date.now() })
     .catch((e) => console.error("BLACKBOX: activity log failed", e));
 }
 
@@ -216,7 +230,8 @@ function watchProjects() {
   const m = me();
   let gotFirst = false;
   unsubProjects = [
-    projectsCol().where("memberIds", "array-contains", m.uid).onSnapshot((snap) => {
+    // Everyone the Artifact is shared with works in the same workspace, so it lists every project.
+    (ARTIFACT ? projectsCol() : projectsCol().where("memberIds", "array-contains", m.uid)).onSnapshot((snap) => {
       projects = {};
       snap.forEach((d) => { projects[d.id] = d.data(); });
       gotFirst = true;
@@ -224,11 +239,13 @@ function watchProjects() {
       else if (subscribedId !== currentId) selectProject(currentId);
       else render();
     }, (e) => { console.error("BLACKBOX: projects listener", e); toast(friendlyError(e), true); }),
-    projectsCol().where("invitedEmails", "array-contains", m.email).onSnapshot((snap) => {
+  ];
+  if (!ARTIFACT) {
+    unsubProjects.push(projectsCol().where("invitedEmails", "array-contains", m.email).onSnapshot((snap) => {
       invites = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       if (gotFirst) render();
-    }, (e) => console.error("BLACKBOX: invites listener", e)),
-  ];
+    }, (e) => console.error("BLACKBOX: invites listener", e)));
+  }
 }
 
 function pickDefaultProject() {
@@ -297,7 +314,7 @@ async function createProject(name) {
     platforms: [],
     ownerId: m.uid,
     memberIds: [m.uid],
-    members: { [m.uid]: { name: m.name, email: m.email } },
+    members: { [m.uid]: { name: storedName(), email: ARTIFACT ? "" : m.email } },
     invitedEmails: [],
     release: { name: "UPDATE 1", due: "", items: [] },
     collections: [],
@@ -369,9 +386,9 @@ function activityFeed(items) {
   return `<ul class="feed">${items.map((a) => {
     const [ic, k] = kind(a.verb || "");
     return `<li>
-      ${avatar(a.uid, 38, a.name)}
+      ${avatar(a.uid, 38, nameOf(a.uid, a.name))}
       <span class="kind kind-${k}">${icon(ic, 18)}</span>
-      <div class="feed-text"><div class="txt"><b>${esc(a.name)}</b> ${esc(a.verb)}${a.target ? ` <b>${esc(a.target)}</b>` : ""}</div>
+      <div class="feed-text"><div class="txt"><b>${esc(nameOf(a.uid, a.name))}</b> ${esc(a.verb)}${a.target ? ` <b>${esc(a.target)}</b>` : ""}</div>
       ${a.detail ? `<div class="sub detail">${esc(a.detail)}</div>` : ""}
       <div class="sub">${a.where ? `in ${esc(a.where)} · ` : ""}${timeAgo(a.at)}</div></div></li>`;
   }).join("")}</ul>`;
@@ -460,7 +477,7 @@ function viewChat() {
   const myUid = user.uid;
   return `${header("Chat", "Chat")}
     <section class="card spaced chat-card">
-      <div class="chat" id="chat-log">${messages.map((m) => `<div class="msg ${m.uid === myUid ? "mine" : ""}">${avatar(m.uid, 34, m.name)}<div class="bubble"><div class="from">${esc(m.name)} · ${timeAgo(m.at)}${m.uid === myUid ? ` <button class="icon-btn bare tiny" data-delete-msg="${esc(m.id)}" title="Delete message">${icon("trash", 13)}</button>` : ""}</div><div class="msg-text">${esc(m.text)}</div></div></div>`).join("") || '<div class="empty">No messages yet. Say hi to your team.</div>'}</div>
+      <div class="chat" id="chat-log">${messages.map((m) => `<div class="msg ${m.uid === myUid ? "mine" : ""}">${avatar(m.uid, 34, nameOf(m.uid, m.name))}<div class="bubble"><div class="from">${esc(nameOf(m.uid, m.name))} · ${timeAgo(m.at)}${m.uid === myUid ? ` <button class="icon-btn bare tiny" data-delete-msg="${esc(m.id)}" title="Delete message">${icon("trash", 13)}</button>` : ""}</div><div class="msg-text">${esc(m.text)}</div></div></div>`).join("") || '<div class="empty">No messages yet. Say hi to your team.</div>'}</div>
       <form class="add-item chat-input" data-form="chat"><input class="input" id="chat-text" name="text" placeholder="Message the team…" required maxlength="1000" autocomplete="off"><button class="btn primary">${icon("send", 16)}Send</button></form>
     </section>`;
 }
@@ -500,17 +517,19 @@ function viewTeam() {
       <section class="card">
         <div class="card-head"><h2>Members</h2><span class="muted">${p.memberIds.length}</span></div>
         <ul class="people">${p.memberIds.map((id) => `<li>${avatar(id, 40)}
-          <div class="who"><div class="name">${esc(memberName(id))}${id === user.uid ? ' <span class="muted">(you)</span>' : ""}</div><div class="sub">${esc(p.members?.[id]?.email || "")}</div></div>
+          <div class="who"><div class="name">${esc(memberName(id))}${id === user.uid ? ' <span class="muted">(you)</span>' : ""}</div><div class="sub">${esc(ARTIFACT ? BB.email(id) : p.members?.[id]?.email || "")}</div></div>
           <span class="role-tag ${id === p.ownerId ? "owner" : ""}">${id === p.ownerId ? "Owner" : "Member"}</span>
           ${isOwner && id !== user.uid ? `<button class="icon-btn bare danger-text" data-remove-member="${esc(id)}" title="Remove from project">${icon("x", 18)}</button>` : ""}
         </li>`).join("")}</ul>
       </section>
       <section class="card">
         <div class="card-head"><h2>Invite people</h2></div>
-        <div class="card-body">
+        <div class="card-body">${ARTIFACT ? `
+          <p>Open the <b>Share</b> menu of this page and invite them by email as <b>Editor</b>. They open the link with their Claude account and press <b>Join</b>.</p>
+          <p class="muted">People with view-only access can read everything but can't make changes.</p>` : `
           <p class="muted">They sign in to BLACKBOX with this email and accept the invitation.</p>
           <form class="add-item" data-form="invite"><input class="input" id="invite-email" name="email" type="email" placeholder="name@example.com" required autocomplete="off"><button class="btn primary">${icon("mail", 16)}Invite</button></form>
-          ${(p.invitedEmails || []).length ? `<div class="side-label">Pending invitations</div><ul class="item-list">${p.invitedEmails.map((e) => `<li>${esc(e)}<button class="icon-btn bare" data-cancel-invite="${esc(e)}" title="Cancel invitation">${icon("x", 16)}</button></li>`).join("")}</ul>` : ""}
+          ${(p.invitedEmails || []).length ? `<div class="side-label">Pending invitations</div><ul class="item-list">${p.invitedEmails.map((e) => `<li>${esc(e)}<button class="icon-btn bare" data-cancel-invite="${esc(e)}" title="Cancel invitation">${icon("x", 16)}</button></li>`).join("")}</ul>` : ""}`}
         </div>
       </section>
     </div>`;
@@ -554,6 +573,15 @@ function route() {
 }
 
 function renderInvites() {
+  if (ARTIFACT) {
+    const p = project();
+    $("#invites").innerHTML = BB.canWrite === false
+      ? `<div class="invite">${icon("mail", 20)}<span>You can view this workspace. Ask the owner to share it with you as <b>Editor</b> to make changes.</span></div>`
+      : p && !p.memberIds.includes(user.uid)
+        ? `<div class="invite">${icon("user", 20)}<span>You're viewing <b>${esc(p.name)}</b>. Join to appear in its team and get tasks assigned.</span><span class="spacer"></span><button class="btn primary" data-join="${esc(currentId)}">Join project</button></div>`
+        : "";
+    return;
+  }
   $("#invites").innerHTML = invites.map((p) => `<div class="invite">
     ${icon("mail", 20)}<span><b>${esc(p.members?.[p.ownerId]?.name || "Someone")}</b> invited you to <b>${esc(p.name)}</b></span>
     <span class="spacer"></span>
@@ -570,8 +598,8 @@ function renderSidebar() {
   for (const id of ["project-picker", "side-nav", "side-collections-section", "side-team-section"]) $(`#${id}`).hidden = !p;
   const m = me();
   $("#side-user").innerHTML = `${avatar(m.uid, 42, m.name)}<div class="who"><div class="name">${esc(m.name)}</div><div class="role">${esc(m.email)}</div></div>
-    <button class="icon-btn bare" data-action="account" title="Edit profile">${icon("user", 19)}</button>
-    <button class="icon-btn bare" data-action="sign-out" title="Sign out">${icon("logout", 19)}</button>`;
+    ${ARTIFACT ? "" : `<button class="icon-btn bare" data-action="account" title="Edit profile">${icon("user", 19)}</button>
+    <button class="icon-btn bare" data-action="sign-out" title="Sign out">${icon("logout", 19)}</button>`}`;
   if (!p) return;
   document.querySelectorAll("#side-nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === r.name));
   $("#bugs-count").textContent = tasks.filter((t) => t.type === "bug" && t.status !== "done").length;
@@ -812,7 +840,7 @@ const actions = {
     const p = project();
     if (!(await ask({ title: `Leave ${p.name}?`, ok: "Leave", danger: true }))) return;
     const id = currentId;
-    await act(() => sub("activity").add({ uid: user.uid, name: me().name, verb: "left the project", target: "", where: "Team", detail: "", at: Date.now() }));
+    await act(() => sub("activity").add({ uid: user.uid, name: storedName(), verb: "left the project", target: "", where: "Team", detail: "", at: Date.now() }));
     await act(() => projectsCol().doc(id).update({
       memberIds: FV().arrayRemove(user.uid),
       [`members.${user.uid}`]: FV().delete(),
@@ -833,7 +861,7 @@ const actions = {
 
 document.addEventListener("click", async (e) => {
   if (!menu.hidden && !e.target.closest("#task-menu") && !e.target.closest("[data-menu]")) closeMenu();
-  const el = e.target.closest("[data-action],[data-menu],[data-task],[data-filter],[data-remove-item],[data-remove-release],[data-remove-member],[data-cancel-invite],[data-accept],[data-decline],[data-delete-msg]");
+  const el = e.target.closest("[data-action],[data-menu],[data-task],[data-filter],[data-remove-item],[data-remove-release],[data-remove-member],[data-cancel-invite],[data-accept],[data-decline],[data-delete-msg],[data-join]");
   if (!el || !user) return;
   const d = el.dataset;
 
@@ -875,6 +903,15 @@ document.addEventListener("click", async (e) => {
     }
     return;
   }
+  if (d.join) {
+    const id = d.join;
+    const ok = await act(() => projectsCol().doc(id).update({
+      memberIds: FV().arrayUnion(user.uid),
+      [`members.${user.uid}`]: { name: storedName(), email: "" },
+    }), "You joined the project");
+    if (ok) log("joined the project", "", "Team");
+    return;
+  }
   if (d.decline) return act(() => projectsCol().doc(d.decline).update({ invitedEmails: FV().arrayRemove(me().email) }), "Invitation declined");
 });
 
@@ -898,7 +935,7 @@ document.addEventListener("submit", async (e) => {
     if (!text) return;
     f.reset();
     const m = me();
-    await act(() => sub("messages").add({ uid: m.uid, name: m.name, text, at: Date.now() }));
+    await act(() => sub("messages").add({ uid: m.uid, name: storedName(), text, at: Date.now() }));
     scrollChatDown();
   }
   if (type === "release-item") {
@@ -1040,6 +1077,11 @@ function onAuth(u) {
   unsubProjects = []; unsubCurrent = [];
   projects = {}; invites = []; currentId = null; subscribedId = null; tasks = []; activity = []; messages = [];
   user = null;
+  if (!u && ARTIFACT) {
+    $("#setup-title").textContent = "Sign in to use BLACKBOX";
+    $("#setup-text").textContent = "Open this page while signed in to Claude. If someone sent you the link, ask them to share the page with your email.";
+    return showScreen("setup-screen");
+  }
   if (!u) {
     setAuthMode("signin");
     return showScreen("auth-screen");
@@ -1065,6 +1107,7 @@ if (!FB_CONFIG || typeof firebase === "undefined") {
   if (typeof firebase === "undefined") console.error("BLACKBOX: Firebase SDK failed to load.");
   showScreen("setup-screen");
 } else {
+  if (ARTIFACT) BB.onNames(render);
   firebase.initializeApp(FB_CONFIG);
   auth = firebase.auth();
   db = firebase.firestore();
