@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BLACKBOX</title>
+  <meta name="description" content="BLACKBOX — manage and plan your game projects.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <span class="logo">BLACKBOX</span>
+        <button class="icon-btn" id="add-project-btn" title="New project" data-icon="plus"></button>
+      </div>
+
+      <div class="side-section">
+        <div class="side-label">Project</div>
+        <div class="select-wrap">
+          <select id="project-select" aria-label="Project"></select>
+          <span class="select-caret" data-icon="chevron"></span>
+        </div>
+      </div>
+
+      <nav class="side-nav" id="side-nav">
+        <a href="#overview" data-view="overview"><span data-icon="home"></span>Overview</a>
+        <a href="#tasks" data-view="tasks"><span data-icon="check"></span>Tasks</a>
+        <a href="#bugs" data-view="bugs"><span data-icon="bug"></span>Bugs</a>
+        <a href="#activity" data-view="activity"><span data-icon="pulse"></span>Activity &amp; Chat<span class="count" id="activity-count">0</span></a>
+      </nav>
+
+      <div class="side-section">
+        <div class="side-label row">Collections <button class="icon-btn small" id="add-collection-btn" title="New collection" data-icon="plus"></button></div>
+        <ul class="side-collections" id="side-collections"></ul>
+      </div>
+
+      <div class="side-section team">
+        <div class="side-label row">Team <span id="team-count">0</span></div>
+        <div class="avatar-stack" id="side-team"></div>
+      </div>
+
+      <div class="side-user" id="side-user"></div>
+    </aside>
+
+    <main class="main">
+      <button class="icon-btn menu-btn" id="menu-btn" title="Menu" data-icon="menu"></button>
+      <div class="panel" id="view"></div>
+    </main>
+  </div>
+
+  <dialog id="task-dialog">
+    <form method="dialog" id="task-form">
+      <h2 id="task-dialog-title">New task</h2>
+      <label>Title<input name="title" required maxlength="80"></label>
+      <label>Description<input name="desc" maxlength="140"></label>
+      <div class="form-grid">
+        <label>Type
+          <select name="type"><option value="task">Task</option><option value="bug">Bug</option></select>
+        </label>
+        <label>Priority
+          <select name="priority">
+            <option value="critical">Critical</option><option value="high">High</option>
+            <option value="medium" selected>Medium</option><option value="low">Low</option>
+          </select>
+        </label>
+        <label>Status
+          <select name="status">
+            <option value="todo">To do</option><option value="progress">In progress</option>
+            <option value="review">In review</option><option value="done">Done</option>
+          </select>
+        </label>
+        <label>Owner<select name="owner" id="owner-select"></select></label>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="btn danger" id="delete-task-btn">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" id="cancel-task-btn">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
