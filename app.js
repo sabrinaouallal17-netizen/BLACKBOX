@@ -33,6 +33,31 @@ function timeAgo(t) {
   return `${Math.round(h / 24)}d ago`;
 }
 
+// In-page replacement for prompt()/confirm(), which sandboxed viewers block.
+// Resolves to an array of field values, [] for a plain confirmation, or null if cancelled.
+function ask({ title, fields = [], ok = "OK", danger = false }) {
+  return new Promise((resolve) => {
+    const d = $("#ask-dialog");
+    const f = $("#ask-form");
+    $("#ask-title").textContent = title;
+    $("#ask-fields").innerHTML = fields.map((fl, i) =>
+      `<label>${esc(fl.label)}<input id="ask-f${i}" name="f${i}" value="${esc(fl.value || "")}" maxlength="80" autocomplete="off" ${fl.optional ? "" : "required"}></label>`).join("");
+    const okBtn = $("#ask-ok");
+    okBtn.textContent = ok;
+    okBtn.className = `btn ${danger ? "danger" : "primary"}`;
+    const done = (v) => {
+      f.onsubmit = d.oncancel = $("#ask-cancel").onclick = null;
+      if (d.open) d.close();
+      resolve(v);
+    };
+    f.onsubmit = (e) => { e.preventDefault(); done(fields.map((_, i) => f.elements[`f${i}`].value.trim())); };
+    $("#ask-cancel").onclick = () => done(null);
+    d.oncancel = (e) => { e.preventDefault(); done(null); };
+    d.showModal();
+    (f.querySelector("input") || okBtn).focus();
+  });
+}
+
 const PRIORITY = {
   critical: { label: "Critical", icon: "chevronsUp" },
   high: { label: "High", icon: "chevronsUp" },
@@ -195,9 +220,9 @@ function viewOverview() {
           ${taskTable(priority, "All caught up — no open tasks.")}
         </section>
         <section class="card">
-          <div class="card-head"><h2>Project collections</h2><a class="link" href="#collection/${esc(p.collections[0]?.id || "")}">View all ${icon("arrow", 16)}</a></div>
+          <div class="card-head"><h2>Project collections</h2><a class="link" href="#collection.${esc(p.collections[0]?.id || "")}">View all ${icon("arrow", 16)}</a></div>
           <div class="card-body"><div class="collections">${p.collections.map((c) => `
-            <a class="coll" href="#collection/${esc(c.id)}"><div class="art">${collectionArt(c.art)}</div>
+            <a class="coll" href="#collection.${esc(c.id)}"><div class="art">${collectionArt(c.art)}</div>
               <div><div class="name">${esc(c.name)}</div><div class="desc">${esc(c.desc)}</div><div class="n">${c.items.length} item${c.items.length === 1 ? "" : "s"}</div></div></a>`).join("")}
           </div></div>
         </section>
@@ -278,7 +303,7 @@ function viewCollection(id) {
 /* ---------- Render ---------- */
 function route() {
   const h = location.hash.slice(1) || "overview";
-  const [name, arg] = h.split("/");
+  const [name, arg] = h.split(".");
   return { name, arg };
 }
 
@@ -289,7 +314,7 @@ function renderSidebar() {
     .map(([id, pr]) => `<option value="${esc(id)}" ${id === state.currentProject ? "selected" : ""}>${esc(pr.name)}</option>`).join("");
   document.querySelectorAll("#side-nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === r.name));
   $("#activity-count").textContent = p.activity.length + p.chat.length;
-  $("#side-collections").innerHTML = p.collections.map((c) => `<li><a href="#collection/${esc(c.id)}" class="${r.name === "collection" && r.arg === c.id ? "active" : ""}">${icon("folder", 22, 1.6)}<span style="flex:1">${esc(c.name)}</span><span class="count">${c.items.length}</span></a></li>`).join("");
+  $("#side-collections").innerHTML = p.collections.map((c) => `<li><a href="#collection.${esc(c.id)}" class="${r.name === "collection" && r.arg === c.id ? "active" : ""}">${icon("folder", 22, 1.6)}<span style="flex:1">${esc(c.name)}</span><span class="count">${c.items.length}</span></a></li>`).join("");
   $("#team-count").textContent = p.team.length;
   $("#side-team").innerHTML = p.team.map((id) => avatar(id, 42)).join("") + `<button class="icon-btn round" data-action="add-member" title="Add member">${icon("plus", 18)}</button>`;
   const me = state.members[state.me];
@@ -352,10 +377,10 @@ form.addEventListener("submit", (e) => {
   render();
 });
 $("#cancel-task-btn").addEventListener("click", () => dialog.close());
-$("#delete-task-btn").addEventListener("click", () => {
+$("#delete-task-btn").addEventListener("click", async () => {
   const p = project();
   const t = p.tasks.find((x) => x.id === editingId);
-  if (!t || !confirm(`Delete "${t.title}"?`)) return;
+  if (!t || !(await ask({ title: `Delete "${t.title}"?`, ok: "Delete", danger: true }))) return;
   p.tasks = p.tasks.filter((x) => x.id !== editingId);
   log("update", `deleted <b>${esc(t.title)}</b>`, t.type === "bug" ? "Bugs" : "Tasks");
   save();
@@ -364,7 +389,7 @@ $("#delete-task-btn").addEventListener("click", () => {
 });
 
 /* ---------- Global events ---------- */
-document.addEventListener("click", (e) => {
+document.addEventListener("click", async (e) => {
   const el = e.target.closest("[data-action],[data-edit],[data-task],[data-filter],[data-remove-item]");
   if (!el) return;
   const p = project();
@@ -388,7 +413,7 @@ document.addEventListener("click", (e) => {
     case "new-task":
       return openTask(null, { type: route().name === "bugs" ? "bug" : "task" });
     case "add-member": {
-      const name = prompt("New team member name:")?.trim();
+      const [name] = (await ask({ title: "Add team member", fields: [{ label: "Name" }], ok: "Add" })) || [];
       if (!name) return;
       let id = slug(name);
       while (state.members[id] && p.team.includes(id)) id += "-2";
@@ -401,16 +426,15 @@ document.addEventListener("click", (e) => {
       return render();
     }
     case "edit-release": {
-      const name = prompt("Release name:", p.release.name)?.trim();
+      const [name, due] = (await ask({ title: "Edit release", fields: [{ label: "Release name", value: p.release.name }, { label: "Due date", value: p.release.due, optional: true }], ok: "Save" })) || [];
       if (!name) return;
-      const due = prompt("Due date:", p.release.due)?.trim();
       p.release.name = name;
       if (due) p.release.due = due;
       save();
       return render();
     }
     case "reset":
-      if (!confirm("Reset all BLACKBOX data to the demo project?")) return;
+      if (!(await ask({ title: "Reset all BLACKBOX data to the demo project?", ok: "Reset", danger: true }))) return;
       state = structuredClone(SEED);
       save();
       location.hash = "#overview";
@@ -454,8 +478,8 @@ $("#project-select").addEventListener("change", (e) => {
   render();
 });
 
-$("#add-project-btn").addEventListener("click", () => {
-  const name = prompt("Project name:")?.trim();
+$("#add-project-btn").addEventListener("click", async () => {
+  const [name] = (await ask({ title: "New project", fields: [{ label: "Project name" }], ok: "Create" })) || [];
   if (!name) return;
   let id = slug(name);
   while (state.projects[id]) id += "-2";
@@ -469,15 +493,16 @@ $("#add-project-btn").addEventListener("click", () => {
   render();
 });
 
-$("#add-collection-btn").addEventListener("click", () => {
-  const name = prompt("Collection name:")?.trim();
+$("#add-collection-btn").addEventListener("click", async () => {
+  const [name] = (await ask({ title: "New collection", fields: [{ label: "Collection name" }], ok: "Create" })) || [];
   if (!name) return;
   const p = project();
   let id = slug(name);
   while (p.collections.some((c) => c.id === id)) id += "-2";
   p.collections.push({ id, name, desc: "", art: id, items: [] });
   save();
-  location.hash = `#collection/${id}`;
+  location.hash = `#collection.${id}`;
+  render();
 });
 
 $("#menu-btn").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
