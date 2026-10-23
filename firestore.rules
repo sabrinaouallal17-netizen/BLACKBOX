@@ -1,0 +1,71 @@
+rules_version = '2';
+
+// BLACKBOX security rules.
+// Only verified accounts get in. A project is visible to its members and to people invited by email.
+// Invited people can only add themselves (accept) or remove their invitation (decline).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function myEmail() {
+      return request.auth.token.email.lower();
+    }
+    function isMember(data) {
+      return signedIn() && request.auth.uid in data.memberIds;
+    }
+    function isInvited(data) {
+      return signedIn() && myEmail() in data.invitedEmails;
+    }
+    function onlyChanged(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+    function acceptsInvite() {
+      return onlyChanged(['memberIds', 'members', 'invitedEmails'])
+        && request.resource.data.memberIds.toSet() == resource.data.memberIds.toSet().union([request.auth.uid].toSet())
+        && request.resource.data.invitedEmails.toSet() == resource.data.invitedEmails.toSet().difference([myEmail()].toSet())
+        && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([request.auth.uid]);
+    }
+    function declinesInvite() {
+      return onlyChanged(['invitedEmails'])
+        && request.resource.data.invitedEmails.toSet() == resource.data.invitedEmails.toSet().difference([myEmail()].toSet());
+    }
+    function validMemberUpdate() {
+      let before = resource.data;
+      let after = request.resource.data;
+      return after.ownerId == before.ownerId
+        && before.ownerId in after.memberIds
+        // Only the owner removes other people; anyone can remove themselves (leave).
+        && (request.auth.uid == before.ownerId
+            || after.memberIds.toSet().hasAll(before.memberIds.toSet().difference([request.auth.uid].toSet())));
+    }
+
+    match /projects/{projectId} {
+      function project() {
+        return get(/databases/$(database)/documents/projects/$(projectId)).data;
+      }
+
+      allow read: if isMember(resource.data) || isInvited(resource.data);
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.memberIds == [request.auth.uid];
+      allow update: if (isMember(resource.data) && validMemberUpdate())
+        || (isInvited(resource.data) && (acceptsInvite() || declinesInvite()));
+      allow delete: if isMember(resource.data) && resource.data.ownerId == request.auth.uid;
+
+      match /tasks/{taskId} {
+        allow read, write: if isMember(project());
+      }
+      match /activity/{entryId} {
+        allow read, delete: if isMember(project());
+        allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid;
+      }
+      match /messages/{messageId} {
+        allow read: if isMember(project());
+        allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid;
+        allow delete: if isMember(project())
+          && (resource.data.uid == request.auth.uid || project().ownerId == request.auth.uid);
+      }
+    }
+  }
+}

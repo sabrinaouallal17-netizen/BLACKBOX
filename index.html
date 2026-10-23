@@ -4,21 +4,62 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BLACKBOX</title>
-  <meta name="description" content="BLACKBOX — manage and plan your game projects.">
+  <meta name="description" content="BLACKBOX — manage and plan your game projects with your team.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="app">
+  <div class="boot" id="boot-screen"><span class="logo">BLACKBOX</span></div>
+
+  <!-- Shown when firebase-config.js has not been filled in yet -->
+  <section class="gate" id="setup-screen" hidden>
+    <div class="gate-card wide">
+      <span class="logo">BLACKBOX</span>
+      <h1>Connect Firebase</h1>
+      <p>BLACKBOX stores projects and accounts in Firebase. Fill in <code>firebase-config.js</code> with your project's web config to start. The README walks through the setup step by step.</p>
+    </div>
+  </section>
+
+  <section class="gate" id="auth-screen" hidden>
+    <form class="gate-card" id="auth-form" novalidate>
+      <span class="logo">BLACKBOX</span>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" data-auth-mode="signin" class="on">Sign in</button>
+        <button type="button" role="tab" data-auth-mode="signup">Create account</button>
+      </div>
+      <label id="auth-name-row" hidden>Display name<input id="auth-name" name="name" maxlength="40" autocomplete="nickname"></label>
+      <label>Email<input id="auth-email" name="email" type="email" required autocomplete="email"></label>
+      <label>Password<input id="auth-password" name="password" type="password" required minlength="6" autocomplete="current-password"></label>
+      <p class="form-error" id="auth-error" role="alert" hidden></p>
+      <button type="submit" class="btn primary block" id="auth-submit">Sign in</button>
+      <button type="button" class="link small" id="forgot-btn">Forgot password?</button>
+    </form>
+  </section>
+
+  <section class="gate" id="verify-screen" hidden>
+    <div class="gate-card">
+      <span class="logo">BLACKBOX</span>
+      <h1>Check your inbox</h1>
+      <p>We sent a confirmation link to <b id="verify-email"></b>. Open it, then come back and press Continue.</p>
+      <p class="form-error" id="verify-error" role="alert" hidden></p>
+      <button type="button" class="btn primary block" id="verify-continue">Continue</button>
+      <div class="row-gap">
+        <button type="button" class="link small" id="verify-resend">Resend email</button>
+        <button type="button" class="link small" id="verify-signout">Use another account</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="app" id="app" hidden>
     <aside class="sidebar" id="sidebar">
       <div class="brand">
         <span class="logo">BLACKBOX</span>
-        <button class="icon-btn" id="add-project-btn" title="New project" data-icon="plus"></button>
+        <button class="icon-btn" data-action="new-project" title="New project" data-icon="plus"></button>
       </div>
 
-      <div class="side-section">
+      <div class="side-section" id="project-picker">
         <div class="side-label">Project</div>
         <div class="select-wrap">
           <select id="project-select" aria-label="Project"></select>
@@ -29,17 +70,19 @@
       <nav class="side-nav" id="side-nav">
         <a href="#overview" data-view="overview"><span data-icon="home"></span>Overview</a>
         <a href="#tasks" data-view="tasks"><span data-icon="check"></span>Tasks</a>
-        <a href="#bugs" data-view="bugs"><span data-icon="bug"></span>Bugs</a>
-        <a href="#activity" data-view="activity"><span data-icon="pulse"></span>Activity &amp; Chat<span class="count" id="activity-count">0</span></a>
+        <a href="#bugs" data-view="bugs"><span data-icon="bug"></span>Bugs<span class="count" id="bugs-count">0</span></a>
+        <a href="#activity" data-view="activity"><span data-icon="pulse"></span>Activity</a>
+        <a href="#chat" data-view="chat"><span data-icon="chat"></span>Chat<span class="count" id="chat-count">0</span></a>
+        <a href="#project" data-view="project"><span data-icon="sliders"></span>Project settings</a>
       </nav>
 
-      <div class="side-section">
-        <div class="side-label row">Collections <button class="icon-btn small" id="add-collection-btn" title="New collection" data-icon="plus"></button></div>
+      <div class="side-section" id="side-collections-section">
+        <div class="side-label row">Collections <button class="icon-btn small" data-action="new-collection" title="New collection" data-icon="plus"></button></div>
         <ul class="side-collections" id="side-collections"></ul>
       </div>
 
-      <div class="side-section team">
-        <div class="side-label row">Team <span id="team-count">0</span></div>
+      <div class="side-section team" id="side-team-section">
+        <div class="side-label row"><a href="#team">Team</a> <span id="team-count">0</span></div>
         <div class="avatar-stack" id="side-team"></div>
       </div>
 
@@ -48,35 +91,38 @@
 
     <main class="main">
       <button class="icon-btn menu-btn" id="menu-btn" title="Menu" data-icon="menu"></button>
+      <div id="invites"></div>
       <div class="panel" id="view"></div>
     </main>
   </div>
 
+  <div class="menu" id="task-menu" role="menu" hidden></div>
+  <div class="toast" id="toast" role="status" hidden></div>
+
   <dialog id="task-dialog">
     <form method="dialog" id="task-form">
       <h2 id="task-dialog-title">New task</h2>
-      <label>Title<input name="title" required maxlength="80"></label>
-      <label>Description<input name="desc" maxlength="140"></label>
+      <label>Title<input id="task-title" name="title" required maxlength="80"></label>
+      <label>Description<input id="task-desc" name="desc" maxlength="140"></label>
       <div class="form-grid">
         <label>Type
-          <select name="type"><option value="task">Task</option><option value="bug">Bug</option></select>
+          <select id="task-type" name="type"><option value="task">Task</option><option value="bug">Bug</option></select>
         </label>
         <label>Priority
-          <select name="priority">
+          <select id="task-priority" name="priority">
             <option value="critical">Critical</option><option value="high">High</option>
             <option value="medium" selected>Medium</option><option value="low">Low</option>
           </select>
         </label>
         <label>Status
-          <select name="status">
+          <select id="task-status" name="status">
             <option value="todo">To do</option><option value="progress">In progress</option>
             <option value="review">In review</option><option value="done">Done</option>
           </select>
         </label>
-        <label>Owner<select name="owner" id="owner-select"></select></label>
+        <label>Owner<select name="owner" id="task-owner"></select></label>
       </div>
       <div class="dialog-actions">
-        <button type="button" class="btn danger" id="delete-task-btn">Delete</button>
         <span class="spacer"></span>
         <button type="button" class="btn ghost" id="cancel-task-btn">Cancel</button>
         <button type="submit" class="btn primary">Save</button>
@@ -87,6 +133,7 @@
   <dialog id="ask-dialog">
     <form id="ask-form">
       <h2 id="ask-title"></h2>
+      <p class="ask-text" id="ask-text" hidden></p>
       <div id="ask-fields"></div>
       <div class="dialog-actions">
         <span class="spacer"></span>
@@ -96,7 +143,10 @@
     </form>
   </dialog>
 
-  <script src="data.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
