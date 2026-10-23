@@ -125,6 +125,10 @@ function friendlyError(e) {
     "auth/invalid-email": "This email address doesn't look right.",
     "auth/missing-password": "Enter your password.",
     "auth/requires-recent-login": "For security, sign out and back in, then try again.",
+    "auth/popup-blocked": "Your browser blocked the Google window. Allow pop-ups for this site and try again.",
+    "auth/account-exists-with-different-credential": "This email already has a BLACKBOX account. Sign in with your password first.",
+    "auth/unauthorized-domain": "This website isn't allowed to sign in yet. Add it in Firebase → Authentication → Settings → Authorized domains.",
+    "auth/operation-not-allowed": "This sign-in method isn't turned on yet in Firebase (Authentication → Sign-in method).",
     "auth/too-many-requests": "Too many attempts. Wait a moment and try again.",
     "auth/network-request-failed": "No connection to the server. Check your internet.",
     "permission-denied": "You don't have access to do that.",
@@ -418,8 +422,10 @@ function listenChannel(cid) {
   editingMsg = null;
   unsubMessages = listen(() => msgCol(cid).orderBy("at").limitToLast(300), (snap) => {
     const atBottom = isChatAtBottom();
+    const before = messages.length;
     messages = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     const last = messages[messages.length - 1];
+    if (!atBottom && messages.length > before && before && last?.uid !== user.uid) chatNewBelow = true;
     if (last) channelLatest[cid] = { at: last.at, uid: last.uid };
     if (route().name === "chat" && document.visibilityState === "visible") markChannelRead(cid);
     render();
@@ -751,6 +757,9 @@ function viewActivity() {
     </div>`;
 }
 
+// Each person's name keeps the colour of their avatar.
+const nameColor = (uid) => `hsl(${hash(uid || "none") % 360} 75% 74%)`;
+let chatNewBelow = false; // new messages arrived while scrolled up
 function msgTime(at) {
   return dayLabel(at) === "Today" ? `Today at ${clockTime(at)}` : `${esc(dayLabel(at))} ${clockTime(at)}`;
 }
@@ -766,7 +775,7 @@ function viewChat() {
     if (newDay) html += `<div class="day-divider"><span>${esc(dayLabel(m.at))}</span></div>`;
     html += grouped
       ? `<div class="msg cont ${extraCls}" data-msg-id="${esc(m.id)}"><span class="msg-time-gutter">${clockTime(m.at)}</span><div class="msg-body">${body}</div>${actions}</div>`
-      : `<div class="msg ${extraCls}" data-msg-id="${esc(m.id)}">${avatar(m.uid, 40, nameOf(m.uid, m.name))}<div class="msg-body"><div class="msg-head"><b>${esc(nameOf(m.uid, m.name))}</b><span class="msg-time" title="${esc(new Date(m.at).toLocaleString())}">${msgTime(m.at)}</span></div>${body}</div>${actions}</div>`;
+      : `<div class="msg ${extraCls}" data-msg-id="${esc(m.id)}">${avatar(m.uid, 42, nameOf(m.uid, m.name))}<div class="msg-body"><div class="msg-head"><b style="color:${nameColor(m.uid)}">${esc(nameOf(m.uid, m.name))}</b><span class="msg-time" title="${esc(new Date(m.at).toLocaleString())}">${msgTime(m.at)}</span></div>${body}</div>${actions}</div>`;
     prev = m;
   };
   for (const m of messages) {
@@ -789,9 +798,9 @@ function viewChat() {
   }
   const gifs = assets.filter((a) => a.type === "image/gif" || a.kind === "gif");
   const chans = channelsOf();
-  return `${header("Chat", "", { actions: false })}
-    <div class="chat-layout">
+  return `<div class="chat-layout">
       <aside class="card chat-channels">
+        <div class="chan-project">${gameIcon(p, 30)}<b class="ellipsis">${esc(p.name)}</b></div>
         <div class="side-label row">Channels ${can("manage") ? `<button class="icon-btn small" data-action="new-channel" title="New channel">${icon("plus", 16)}</button>` : ""}</div>
         <select id="channel-select" class="channel-select" aria-label="Channel">${chans.map((c) => `<option value="${esc(c.id)}" ${c.id === ch.id ? "selected" : ""}># ${esc(c.name)}</option>`).join("")}</select>
         <ul class="chan-list">${chans.map((c) => `<li><a href="#chat.${esc(c.id)}" class="${c.id === ch.id ? "active" : ""} ${isUnread(c.id) && c.id !== ch.id ? "unread" : ""}">${icon("hash", 17)}<span class="grow ellipsis">${esc(c.name)}</span>${isUnread(c.id) && c.id !== ch.id ? '<span class="dot" title="New messages"></span>' : ""}</a></li>`).join("")}</ul>
@@ -800,6 +809,7 @@ function viewChat() {
         <div class="drop-hint">${icon("upload", 28)}<span>Drop files to add them to your message</span></div>
         <div class="chan-head">${icon("hash", 20)}<b>${esc(ch.name)}</b>${ch.topic ? `<span class="chan-topic ellipsis">${esc(ch.topic)}</span>` : ""}<span class="spacer"></span>
           ${can("manage") ? `<button class="icon-btn bare" data-chan-menu="${esc(ch.id)}" data-menu-key="chan:${esc(ch.id)}" aria-haspopup="menu" title="Channel settings">${icon("dots", 18)}</button>` : ""}</div>
+        <button type="button" class="jump-latest ${chatNewBelow ? "show" : ""}" data-action="jump-latest">${icon("arrowDown", 15)}New messages</button>
         <div class="chat" id="chat-log">${html || `<div class="chat-empty">${icon("hash", 34)}<h3>Welcome to #${esc(ch.name)}</h3><p class="muted">${ch.id === "general" ? `This is the start of ${esc(p.name)}'s team chat.` : "This is the start of the channel."} Say hi, share screenshots, drop GIFs, type @ to mention someone.</p></div>`}</div>
         <form class="composer" data-form="chat" data-drafts>
           ${chatPending.length ? `<div class="pending">${chatPending.map((f) => `<div class="pend">${f.preview ? `<img src="${esc(f.preview)}" alt="">` : `<span class="pend-file">${icon("file", 22)}</span>`}<span class="pend-name ellipsis">${esc(f.file.name)}</span><button type="button" class="icon-btn bare tiny" data-remove-pending="${esc(f.id)}" title="Remove">${icon("x", 13)}</button></div>`).join("")}</div>` : ""}
@@ -843,10 +853,14 @@ function isChatAtBottom() {
   const el = $("#chat-log");
   return !el || el.scrollHeight - el.scrollTop - el.clientHeight < 60;
 }
-function scrollChatDown() {
+function scrollChatDown(smooth = false) {
   const el = $("#chat-log");
-  if (el) el.scrollTop = el.scrollHeight;
+  if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+  if (chatNewBelow) { chatNewBelow = false; $(".jump-latest")?.classList.remove("show"); }
 }
+document.addEventListener("scroll", (e) => {
+  if (e.target.id === "chat-log" && chatNewBelow && isChatAtBottom()) { chatNewBelow = false; $(".jump-latest")?.classList.remove("show"); }
+}, true);
 
 function viewRelease() {
   return `${header("Release")}<div class="narrow">${releaseCard(true)}</div>`;
@@ -1036,6 +1050,17 @@ function assetChooser(target) {
   return `<button type="button" class="btn ghost small" data-pick-asset="${target}" data-menu-key="pick:${target}" aria-haspopup="menu">${icon("images", 15)}From assets</button>`;
 }
 
+function aboutCard() {
+  return `<section class="card about-card"><div class="card-head"><h2>BLACKBOX</h2><span class="tag-chip">v${APP_VERSION}</span></div>
+    <div class="card-body settings">
+      <p class="muted small">${esc(CHANGELOG[0].title)}.</p>
+      <div class="row-gap">
+        <button type="button" class="btn small" data-action="whats-new">${icon("sparkle", 15)}What's new</button>
+        ${!ARTIFACT && installPrompt ? `<button type="button" class="btn primary small" data-action="install-app">${icon("download", 15)}Install the app</button>` : ""}
+      </div>
+      ${!ARTIFACT && !installPrompt && !isStandalone() ? '<p class="muted small">To install BLACKBOX as an app: in Chrome or Edge, use the install icon in the address bar; on iPhone, tap Share then “Add to Home Screen”.</p>' : ""}
+    </div></section>`;
+}
 function viewProfile() {
   const m = me();
   const prof = profiles[user.uid] || {};
@@ -1057,8 +1082,9 @@ function viewProfile() {
           <div><button class="btn primary">${icon("save", 17)}Save profile</button></div>
         </div>
       </form>
-      ${ARTIFACT ? `<div class="settings-side"><section class="card"><div class="card-head"><h2>Sign-in</h2></div><div class="card-body"><p class="muted">You use BLACKBOX with your Claude account. Your sign-in email and password are managed in Claude.</p></div></section></div>` : `
+      ${!ARTIFACT && !user.providerData?.some((x) => x.providerId === "password") ? `<div class="settings-side">${aboutCard()}<section class="card"><div class="card-head"><h2>Sign-in</h2></div><div class="card-body"><p class="muted">You sign in with Google as <b>${esc(m.email)}</b>. Your email and password are managed in your Google account.</p></div></section></div>` : ARTIFACT ? `<div class="settings-side"><section class="card"><div class="card-head"><h2>Sign-in</h2></div><div class="card-body"><p class="muted">You use BLACKBOX with your Claude account. Your sign-in email and password are managed in Claude.</p></div></section>${aboutCard()}</div>` : `
       <div class="settings-side">
+        ${aboutCard()}
         <form class="card" data-form="change-email" data-drafts>
           <div class="card-head"><h2>Sign-in email</h2></div>
           <div class="card-body settings">
@@ -1126,25 +1152,26 @@ function renderSidebar() {
   const m = me();
   $("#side-user").innerHTML = `<a class="side-me ${r.name === "profile" ? "active" : ""}" href="#profile" title="Edit your profile">${avatar(m.uid, 42, m.name)}<div class="who"><div class="name ellipsis">${esc(m.name)}</div><div class="role ellipsis">${esc(profiles[m.uid]?.title || (ARTIFACT ? "Edit profile" : m.email))}</div></div></a>
     ${ARTIFACT ? "" : `<button class="icon-btn bare" data-action="sign-out" title="Sign out">${icon("logout", 19)}</button>`}`;
+  $("#mobile-title").textContent = p ? p.name : "BLACKBOX";
+  $("#install-btn").hidden = ARTIFACT || !installPrompt;
+  $$("#mobile-tabs a").forEach((a) => a.classList.toggle("active", a.dataset.tab === r.name || (a.dataset.tab === "tasks" && r.name === "bugs")));
+  $("#mobile-tabs").hidden = !p;
   if (!p) return;
   document.querySelectorAll("#side-nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === r.name));
-  $('#side-nav a[data-view="chat"]').classList.toggle("has-dot", channelsOf().some((c) => isUnread(c.id) && !(r.name === "chat" && c.id === channelId)));
+  const chatDot = channelsOf().some((c) => isUnread(c.id) && !(r.name === "chat" && c.id === channelId));
+  $('#side-nav a[data-view="chat"]').classList.toggle("has-dot", chatDot);
+  $('#mobile-tabs a[data-tab="chat"]').classList.toggle("has-dot", chatDot);
   $("#side-collections").innerHTML = (p.collections || []).map((c) => `<li><a href="#collection.${esc(c.id)}" class="${r.name === "collection" && r.arg === c.id ? "active" : ""}">${icon("folder", 20, 1.6)}<span class="grow ellipsis">${esc(c.name)}</span></a></li>`).join("")
     || '<li class="muted small-pad">No collections yet</li>';
   $("#team-count").textContent = p.memberIds.length;
   $("#side-team").innerHTML = p.memberIds.slice(0, 6).map((id) => avatar(id, 40)).join("") + `<a class="icon-btn round" href="#team" title="Team">${icon("users", 17)}</a>`;
 }
-function renderWhatsNew() {
-  const seen = storeGet("blackbox:seen-version");
-  const btn = $("#whats-new-btn");
-  btn.innerHTML = `${icon("sparkle", 15)}<span>What's new · v${APP_VERSION}</span>`;
-  btn.classList.toggle("has-dot", seen !== APP_VERSION);
-}
+const whatsNewUnseen = () => storeGet("blackbox:seen-version") !== APP_VERSION;
 function openWhatsNew() {
   storeSet("blackbox:seen-version", APP_VERSION);
   $("#whats-new-list").innerHTML = CHANGELOG.map((v) => `<section class="wn-entry"><div class="row-gap"><span class="tag-chip">v${esc(v.version)}</span><b>${esc(v.title)}</b><span class="muted small">${esc(new Date(v.date).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }))}</span></div><ul>${v.items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul></section>`).join("");
   $("#whats-new-dialog").showModal();
-  renderWhatsNew();
+  renderNotifPanel();
 }
 
 // Snapshot listeners batch their updates: several changes in one frame cause one render.
@@ -1216,7 +1243,7 @@ function render() {
   const routeKey = `${currentId}:${location.hash}`;
   const entering = routeKey !== lastRoute;
   lastRoute = routeKey;
-  view.className = `panel view-${r.name}${entering ? " view-enter" : ""}`;
+  view.className = `panel view-${r.name}${entering && !viewTransition ? " view-enter" : ""}`;
   const html = r.name === "profile" ? viewProfile() : project() ? (views[r.name] || viewOverview)() : viewWelcome();
   // A new page is drawn fresh; the same page is patched.
   if (entering) view.innerHTML = html; else patch(view, html);
@@ -1224,7 +1251,6 @@ function render() {
   upgradeSelects(view);
   renderSidebar();
   renderNotifPanel();
-  renderWhatsNew();
   if (r.name === "chat" && project() && document.visibilityState === "visible") markChannelRead();
   document.title = project() ? `${project().name} · BLACKBOX` : "BLACKBOX";
   autoGrow($("#chat-text"));
@@ -1866,6 +1892,9 @@ const actions = {
   },
   "toggle-notifs": () => { notifOpen = !notifOpen; renderNotifPanel(); },
   "read-all": () => markAllRead(),
+  "jump-latest": () => scrollChatDown(true),
+  "open-menu": () => setMenu(true),
+  "install-app": () => installApp(),
   "whats-new": () => openWhatsNew(),
   "new-project": async () => {
     const [name] = (await ask({ title: "New project", fields: [{ label: "Game name", max: 40 }], ok: "Create" })) || [];
@@ -2220,10 +2249,22 @@ $("#project-select").addEventListener("change", (e) => {
   location.hash = "#overview";
 });
 
-$("#menu-btn").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
+function setMenu(open) {
+  $("#sidebar").classList.toggle("open", open);
+  $("#scrim").hidden = !open;
+}
+$("#menu-btn").addEventListener("click", () => setMenu(!$("#sidebar").classList.contains("open")));
+$("#scrim").addEventListener("click", () => setMenu(false));
 let lastView = route().name;
+// Pages render straight away and animate in with CSS (the browser's View Transitions would swallow
+// clicks made during the animation).
+let viewTransition = false;
+function navigateRender(after) {
+  render();
+  after?.();
+}
 window.addEventListener("hashchange", () => {
-  $("#sidebar").classList.remove("open");
+  setMenu(false);
   if (route().name !== lastView) {
     taskFilter = { status: "all", owner: "all" };
     itemQuery = "";
@@ -2235,8 +2276,7 @@ window.addEventListener("hashchange", () => {
   closeMentionPicker();
   notifOpen = false;
   if (route().name === "chat" && project()) listenChannel(channelsOf().some((c) => c.id === route().arg) ? route().arg : "general");
-  render();
-  if (route().name === "chat") scrollChatDown();
+  navigateRender(() => { if (route().name === "chat") scrollChatDown(); });
 });
 
 /* ---------- Auth screens ---------- */
@@ -2286,6 +2326,21 @@ $("#auth-form").addEventListener("submit", async (e) => {
     authError("#auth-error", friendlyError(err));
   } finally {
     btn.disabled = false;
+  }
+});
+
+// Google sign-in: a popup on computers, a full-page redirect on phones and in the installed app.
+$("#google-btn").addEventListener("click", async () => {
+  const provider = new firebase.auth.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
+  try {
+    if (isStandalone() || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) await auth.signInWithRedirect(provider);
+    else await auth.signInWithPopup(provider);
+    authError("#auth-error", "");
+  } catch (err) {
+    if (err.code === "auth/popup-closed-by-user" || err.code === "auth/cancelled-popup-request") return;
+    console.error("BLACKBOX: google sign-in", err);
+    authError("#auth-error", friendlyError(err));
   }
 });
 

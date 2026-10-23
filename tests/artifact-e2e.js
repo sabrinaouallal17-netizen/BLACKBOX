@@ -1,5 +1,5 @@
 // End-to-end test of the Artifact edition against tests/mock-claude.js.
-// Usage: PW=<playwright> URL=<served built page> OUT=<screenshot dir> node tests/artifact-e2e.js
+// Usage: PW=<playwright> IDIOMORPH=<idiomorph.min.js> URL=<served built page> OUT=<screenshot dir> node tests/artifact-e2e.js
 const { chromium } = require(process.env.PW);
 const path = require('path');
 const MOCK = path.join(__dirname, 'mock-claude.js');
@@ -40,11 +40,12 @@ const blobs = new Map();
     const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.click(selector)]);
     await fc.setFiles(files);
   };
-  const go = async (page, view, sel = '#view h1') => { await page.evaluate((h) => { location.hash = h; }, view); await page.waitForSelector(sel); };
+  const go = async (page, view, sel = '#view h1') => { await page.evaluate((h) => { location.hash = h; }, view); await page.waitForSelector(`#view.view-${view.split('.')[0]}`); await page.waitForSelector(sel); };
   const confirmAsk = async (p, ...vals) => { for (let i = 0; i < vals.length; i++) await p.fill(`#ask-f${i}`, vals[i]); await p.click('#ask-ok'); };
   const titles = (p) => p.locator('.card').first().locator('tbody tr .task-title').allTextContents();
   const newTask = async (p, title) => { await p.click('[data-action=new-task] >> nth=0'); await p.fill('#task-title', title); await p.click('#task-form button[type=submit]'); await p.waitForSelector(`text=${title}`); };
   const menu = async (p, title, item) => { await p.locator('tbody tr', { hasText: title }).locator('[data-task-menu]').click(); await p.locator('#popover button', { hasText: item }).click(); };
+  const waitNotif = (page, type) => page.waitForFunction((t) => allNotifs().some((n) => n.type === t && !n.read), type);
   const pick = (p, label) => p.locator('#popover button', { hasText: label }).first().click();
 
   // Signed-out visitor
@@ -59,7 +60,7 @@ const blobs = new Map();
   await A.click('.welcome [data-action=new-project]'); await confirmAsk(A, 'Baddie Dice');
   await A.waitForSelector('#set-name');
   await A.fill('#set-desc', 'Roll dice, collect rare characters.');
-  await A.check('#plat-roblox', { force: true }); await A.check('#plat-pc', { force: true });
+  await A.click('label:has(#plat-roblox) span'); await A.click('label:has(#plat-pc) span');
   await A.fill('#tag-entry', 'RNG'); await A.press('#tag-entry', 'Enter');
   await A.click('[data-form=project] button.primary'); await A.waitForSelector('text=Project saved');
   await choose(A, '[data-pick=icon]', file('icon.png', await png(A, '#7c3aed', 256, 256, 'BD')));
@@ -146,7 +147,7 @@ const blobs = new Map();
   ok(true, 'unread dot on a channel with new messages');
   await B.fill('#chat-text', 'ping @Ali'); await B.waitForSelector('#mention-picker:not([hidden])'); await B.press('#chat-text', 'Enter');
   await B.type('#chat-text', 'look'); await B.press('#chat-text', 'Enter');
-  await A.waitForSelector('#bell.has-dot');
+  await waitNotif(A, 'mention');
   await A.click('#bell');
   ok((await A.textContent('.notif-panel')).includes('mentioned you'), 'mention notification');
   await A.click('.np-item.unread');
@@ -169,7 +170,7 @@ const blobs = new Map();
   await A.click('[data-action=new-update]'); await A.fill('#upd-title', 'UPDATE 1'); await A.fill('#upd-new', 'Dice\nQuests');
   await A.click('button[name=intent][value=publish]');
   await A.waitForSelector('.patch');
-  await B.waitForSelector('#bell.has-dot');
+  await waitNotif(B, 'update');
   ok(true, 'published update notifies the team');
 
   // Asset folders
@@ -210,7 +211,7 @@ const blobs = new Map();
   // Mobile
   await A.setViewportSize({ width: 390, height: 844 });
   for (const v of ['overview', 'chat', 'team', 'assets', 'activity', 'updates', 'tasks']) {
-    await go(A, v); await A.waitForTimeout(300);
+    await go(A, v, v === 'chat' ? '#chat-text' : '#view h1'); await A.waitForTimeout(300);
     const w = await A.evaluate(() => document.documentElement.scrollWidth);
     ok(w <= 390, `mobile ${v} no horizontal scroll (${w})`);
   }

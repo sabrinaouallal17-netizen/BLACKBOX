@@ -62,8 +62,8 @@ function renderNotifPanel() {
   const bell = $("#bell");
   if (!bell) return;
   const unread = unreadCount();
-  bell.classList.toggle("has-dot", unread > 0);
-  bell.setAttribute("aria-expanded", String(notifOpen));
+  const fresh = whatsNewUnseen();
+  $$(".bell").forEach((b) => { b.classList.toggle("has-dot", unread > 0 || fresh); b.setAttribute("aria-expanded", String(notifOpen)); });
   bell.title = unread ? `Notifications (${unread} unread)` : "Notifications";
   const panel = $("#notif-panel");
   panel.hidden = !notifOpen;
@@ -75,7 +75,8 @@ function renderNotifPanel() {
       return `<li><button class="np-item ${n.read ? "" : "unread"}" data-notif="${esc(n.pid)}/${esc(n.id)}">
         ${avatar(n.from, 34, nameOf(n.from, n.fromName))}<span class="act-badge c-${c}">${icon(ic, 14)}</span>
         <span class="np-text"><span>${notifText(n)}</span><span class="muted small">${timeAgo(n.at)}</span></span></button></li>`;
-    }).join("")}</ul>` : `<div class="empty">${icon("bell", 26)}<p>You're all caught up.</p></div>`}`);
+    }).join("")}</ul>` : `<div class="empty">${icon("bell", 26)}<p>You're all caught up.</p></div>`}
+    <button class="np-foot ${fresh ? "fresh" : ""}" data-action="whats-new">${icon("sparkle", 15)}<span>What's new in BLACKBOX <b>v${APP_VERSION}</b></span>${fresh ? '<span class="dot"></span>' : ""}</button>`);
 }
 async function openNotif(key) {
   const [pid, id] = key.split("/");

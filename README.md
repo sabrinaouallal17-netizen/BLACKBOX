@@ -1,10 +1,10 @@
 # BLACKBOX
 
-Une application pour gérer et planifier nos jeux en équipe : tâches, bugs, releases, collections d'assets, activité et chat, avec de vrais comptes (connexion par email).
+Une application pour gérer et planifier nos jeux en équipe : tâches, bugs, releases, collections d'assets, activité et chat, avec de vrais comptes (email ou compte Google). Elle s'installe comme une application sur ordinateur et téléphone.
 
 ## Fonctionnalités
 
-- **Comptes** : inscription et connexion par email et mot de passe, confirmation de l'email, mot de passe oublié, changement d'email (confirmé par lien) et de mot de passe
+- **Comptes** : connexion avec un compte Google, ou inscription par email et mot de passe avec confirmation de l'email, mot de passe oublié, changement d'email (confirmé par lien) et de mot de passe
 - **Profil** : photo, nom, rôle, email de contact, visibles par l'équipe
 - **Projets** : icône et miniature du jeu, description, plateformes avec icônes (Roblox, PC, Mac, mobile, consoles…), tags
 - **Équipe** : invitation par email, acceptation ou refus, retrait de membres par le propriétaire
@@ -19,7 +19,9 @@ Une application pour gérer et planifier nos jeux en équipe : tâches, bugs, re
 - **Updates** : patch notes du jeu (Nouveautés, Améliorations, Corrections, Équilibrage), pré-remplies avec les tâches terminées et les bugs corrigés
 - **Dossiers d'assets** et **téléchargement** des images (chat, aperçu, assets)
 - **Fluidité** : la page se met à jour sur place (bibliothèque [Idiomorph](https://github.com/bigskysoftware/idiomorph)), sans clignotement ; les messages apparaissent tout de suite pendant l'envoi
-- **What's new** : l'historique des versions de BLACKBOX, dans la barre latérale
+- **What's new** : l'historique des versions de BLACKBOX, dans le panneau de notifications et le profil
+- **Application installable** : bouton **Install app** dans la barre latérale (Chrome, Edge, Android) ou **Partager → Sur l'écran d'accueil** sur iPhone ; fonctionne hors ligne une fois chargée
+- **Mobile** : barre du haut, onglets en bas, cartes de tâches, fenêtres en bas d'écran
 - **Sauvegarde** : tout est enregistré en ligne et partagé en temps réel ; l'indicateur en bas de la barre latérale affiche « All changes saved », « Saving… » ou « Offline ». Un texte en cours de saisie n'est pas effacé quand un coéquipier modifie quelque chose.
 
 Dans la version GitHub (Firebase), les images sont compressées et stockées dans la base (GIF jusqu'à 600 Ko), sans Firebase Storage, qui demande un abonnement payant. La version Artifact accepte des fichiers jusqu'à 20 Mo.
@@ -29,7 +31,7 @@ Dans la version GitHub (Firebase), les images sont compressées et stockées dan
 BLACKBOX stocke les comptes et les données dans [Firebase](https://firebase.google.com), gratuit pour un petit projet.
 
 1. Va sur la [console Firebase](https://console.firebase.google.com) et clique **Add project** (Créer un projet). Google Analytics n'est pas nécessaire.
-2. **Build → Authentication → Get started**, puis dans l'onglet **Sign-in method**, active **Email/Password**.
+2. **Build → Authentication → Get started**, puis dans l'onglet **Sign-in method**, active **Email/Password**, puis **Google** (choisis un email d'assistance et clique **Save**).
 3. **Build → Firestore Database → Create database**. Choisis une région proche (par exemple `europe-west`) et le mode **production**.
 4. Toujours dans Firestore, onglet **Rules** : remplace tout le contenu par celui du fichier [`firestore.rules`](firestore.rules), puis clique **Publish**.
 5. **Project settings** (roue dentée) → **General** → **Your apps** → icône **Web** `</>`. Donne un nom (par exemple `blackbox`), sans Firebase Hosting. Firebase affiche un bloc `firebaseConfig`.
@@ -89,4 +91,5 @@ PW=<chemin vers playwright> SDK=<chemin vers node_modules/firebase> OUT=/tmp nod
 - `firebase-config.js` : configuration du projet Firebase
 - `firestore.rules` : règles de sécurité de la base
 - `firebase.json` : configuration des émulateurs
+- `manifest.webmanifest`, `sw.js`, `icons/` : application installable (PWA)
 - `artifact/` : édition Artifact (`backend.js`, `build.py`)

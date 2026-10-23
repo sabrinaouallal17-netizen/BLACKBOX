@@ -64,7 +64,8 @@ async function verify(page, mail) {
   await page.waitForSelector('#app:not([hidden])');
 }
 const confirmAsk = async (page, ...vals) => { for (let i = 0; i < vals.length; i++) await page.fill(`#ask-f${i}`, vals[i]); await page.click('#ask-ok'); };
-const go = async (page, view, sel = '#view h1') => { await page.goto(BASE + '#' + view); await page.waitForSelector(sel); };
+// Waits for the requested page itself (page changes render after a short cross-fade).
+const go = async (page, view, sel = '#view h1') => { await page.goto(BASE + '#' + view); await page.waitForSelector(`#view.view-${view.split('.')[0]}`); await page.waitForSelector(sel); };
 const rows = (page) => page.locator('.card').first().locator('tbody tr .task-title').allTextContents();
 const orderIs = (page, s) => page.waitForFunction((s) => [...document.querySelectorAll('.card tbody tr .task-title')].map((e) => e.textContent).join() === s, s);
 async function newTask(page, title, type = 'task') {
@@ -83,6 +84,8 @@ async function choose(page, selector, files) {
   const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.click(selector)]);
   await fc.setFiles(files);
 }
+// Waits until a notification of this type has arrived (the bell dot can also mean "what's new").
+const waitNotif = (page, type) => page.waitForFunction((t) => allNotifs().some((n) => n.type === t && !n.read), type);
 const pick = (page, label) => page.locator('#popover button', { hasText: label }).first().click();
 const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/demo-blackbox/databases/(default)/documents/${path}`, { headers: { Authorization: 'Bearer owner' } })).json();
 
@@ -90,6 +93,7 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
   const browser = await chromium.launch();
   const A = await newUser(browser, 'Alice');
   ok(await A.isVisible('#auth-screen'), 'auth screen shown when signed out');
+  ok(await A.isVisible('#google-btn'), 'Continue with Google button on the sign-in screen');
 
   A.expectAuthFail = true;
   await A.fill('#auth-email', 'nobody@test.com'); await A.fill('#auth-password', 'wrongpass'); await A.click('#auth-submit');
@@ -106,7 +110,8 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
   await A.click('.welcome [data-action=new-project]'); await confirmAsk(A, 'Baddie Dice');
   await A.waitForSelector('#set-name');
   await A.fill('#set-desc', 'Roll dice, collect rare characters.');
-  await A.check('#plat-roblox', { force: true }); await A.check('#plat-mobile', { force: true });
+  await A.click('label:has(#plat-roblox) span'); await A.click('label:has(#plat-mobile) span');
+  ok(await A.isChecked('#plat-roblox') && await A.isChecked('#plat-mobile'), 'platform tiles toggle on click');
   for (const t of ['RNG', 'Collection', 'RNG']) { await A.fill('#tag-entry', t); await A.press('#tag-entry', 'Enter'); }
   ok(await A.locator('#tag-box .tag-chip').count() === 2, 'tag chips added (duplicates ignored)');
   await A.click('[data-form=project] button.primary');
@@ -263,6 +268,7 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
   await B.click('[data-accept]');
   await B.waitForSelector('h1:text("Project overview")');
   ok(await B.textContent('#team-count') === '2', 'Bob joined');
+  await B.waitForSelector('.head .avatar.photo');
   ok(await B.locator('.head .avatar.photo').count() === 1, "Bob sees Alice's photo");
   await go(B, 'team', '.people li:nth-child(2)');
   ok((await B.textContent('.people')).includes('Lead developer') && (await B.textContent('.people')).includes('alice.contact@test.com'), "Bob sees Alice's role and contact email");
@@ -356,21 +362,22 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
   await B.type('#chat-text', 'love it'); await B.press('#chat-text', 'Enter');
   await A.waitForSelector('.msg.mentioned .mention.me');
   ok(true, 'mention shown and highlighted for the person mentioned');
-  await A.waitForSelector('#bell.has-dot');
+  await waitNotif(A, 'mention');
   await A.click('#bell');
   await A.waitForSelector('.np-item.unread');
   ok((await A.textContent('.np-item.unread')).includes('mentioned you'), 'notification for the mention');
   await go(A, 'overview');
   await A.click('#bell'); await A.click('.np-item.unread');
   await A.waitForSelector('.chan-head:has-text("art-team")');
-  ok(!(await A.isVisible('#bell.has-dot')), 'opening the notification goes to the message and marks it read');
+  await A.waitForFunction(() => unreadCount() === 0);
+  ok(true, 'opening the notification goes to the message and marks it read');
 
   // Assigning a task notifies the assignee
   await go(A, 'tasks');
   await menu(A, 'T3 quests', 'Edit');
   await A.click('#cs-task-owner'); await pick(A, 'Bob');
   await A.click('#task-form button[type=submit]');
-  await B.waitForSelector('#bell.has-dot');
+  await waitNotif(B, 'assign');
   await B.click('#bell');
   ok((await B.textContent('.notif-panel')).includes('assigned you T3 quests'), 'assignment notification');
   await B.click('#bell');
@@ -388,8 +395,9 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
   await A.waitForSelector('.kcol[data-kcol=progress] .kcard:has-text("T3 quests")');
   await A.waitForFunction(() => tasks.find((t) => t.title === 'T3 quests')?.status === 'progress');
   ok(true, 'drag a card from To do to In progress');
-  await A.reload(); await A.waitForSelector('.board');
-  ok(await A.locator('.kcol[data-kcol=progress] .kcard:has-text("T3 quests")').count() === 1, 'board column and mode saved after reload');
+  await A.reload();
+  await A.waitForSelector('.kcol[data-kcol=progress] .kcard:has-text("T3 quests")');
+  ok(true, 'board column and mode saved after reload');
   await A.screenshot({ path: process.env.OUT + '/f-board.png' });
   await A.click('[data-board-mode=list]');
 
@@ -442,7 +450,7 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
   await A.click('button[name=intent][value=publish]');
   await A.waitForSelector('.patch');
   ok((await A.textContent('.patch-sections')).includes('T1 dice') && await A.locator('.patch-sec strong').count() === 1, 'published patch notes with sections and formatting');
-  await B.waitForSelector('#bell.has-dot');
+  await waitNotif(B, 'update');
   await B.click('#bell');
   ok((await B.textContent('.notif-panel')).includes('published UPDATE 1: Dice'), 'team notified of the update');
   await B.click('.np-item.unread');
@@ -480,10 +488,11 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
   ok(await A.locator('.asset-card').count() === 4, 'deleting a folder keeps its files');
 
   // What's new
-  await A.click('#whats-new-btn');
+  await A.click('#bell'); await A.click('.np-foot');
   await A.waitForSelector('#whats-new-dialog[open]');
-  ok((await A.textContent('#whats-new-list')).includes('v1.5'), "What's new lists this update");
+  ok((await A.textContent('#whats-new-list')).includes('v1.6'), "What's new (from the notifications panel) lists this update");
   await A.click('#whats-new-dialog button.primary');
+  ok(await A.locator('#whats-new-btn').count() === 0, "What's new is no longer under Team");
 
   // Activity
   await go(A, 'activity', '.act-list');
@@ -501,8 +510,15 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
 
   // Mobile
   await A.setViewportSize({ width: 390, height: 844 });
+  await go(A, 'overview'); await A.waitForTimeout(350);
+  ok(await A.isVisible('#mobile-tabs') && await A.isVisible('.mobile-top') && (await A.locator('#sidebar').boundingBox()).x + (await A.locator('#sidebar').boundingBox()).width <= 1, 'mobile: top bar and bottom tabs instead of the sidebar');
+  await A.click('#mobile-tabs [data-tab=chat]'); await A.waitForSelector('#chat-text');
+  ok(await A.locator('#mobile-tabs a.active[data-tab=chat]').count() === 1, 'mobile: tabs navigate');
+  await A.click('#mobile-tabs [data-action=open-menu]'); await A.waitForSelector('#sidebar.open');
+  await A.click('#scrim', { position: { x: 370, y: 400 } }); await A.waitForSelector('#sidebar:not(.open)');
+  ok(true, 'mobile: menu drawer opens and closes');
   for (const v of ['overview', 'chat', 'assets', 'updates', 'tasks', 'activity', 'project', 'profile']) {
-    await go(A, v); await A.waitForTimeout(300);
+    await go(A, v, v === 'chat' ? '#chat-text' : '#view h1'); await A.waitForTimeout(300);
     const w = await A.evaluate(() => document.documentElement.scrollWidth);
     ok(w <= 390, `mobile ${v} no horizontal scroll (${w})`);
   }

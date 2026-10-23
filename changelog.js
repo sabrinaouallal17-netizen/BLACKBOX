@@ -3,6 +3,21 @@
 // What's new in BLACKBOX itself (shown from the sidebar). Newest first; add an entry for every change.
 const CHANGELOG = [
   {
+    version: "1.6",
+    date: "2026-10-23",
+    title: "Ready for everyone",
+    items: [
+      "Sign in with your Google account, or with email and password",
+      "Install BLACKBOX as an app on your computer or phone (offline support included)",
+      "Redesigned chat: full height, coloured names, cleaner composer, a “New messages” button when you scroll up",
+      "Smoother page changes with soft cross-fades",
+      "Mobile layout: top bar, bottom tabs, task cards, bottom sheets, swipeable board",
+      "Slightly bigger text and spacing; more room between the logo and the bell",
+      "What's new moved to the notifications panel and your profile",
+      "On phones, pop-up messages no longer cover the chat box",
+    ],
+  },
+  {
     version: "1.5",
     date: "2026-10-23",
     title: "Teams, channels and patch notes",

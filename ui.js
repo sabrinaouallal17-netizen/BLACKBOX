@@ -110,7 +110,7 @@ function openPopover(anchor, build, pick, { focus } = {}) {
   el.innerHTML = items.map((it, i) => it.sep ? "<hr>" : `<button type="button" role="menuitem" data-pi="${i}" class="${it.danger ? "danger-text" : ""} ${it.selected ? "selected" : ""}" ${it.disabled ? "disabled" : ""}>
     ${it.img ? `<img class="pi-img" src="${src(it.img)}" alt="">` : it.icon ? icon(it.icon, 16) : ""}<span class="pi-label">${esc(it.label)}</span>${it.selected ? `<span class="pi-check">${icon("checkSmall", 15, 2.2)}</span>` : ""}</button>`).join("");
   el.hidden = false;
-  Object.assign(popover, { el, anchorKey: anchor.dataset.menuKey || null, build, pick, anchor, items });
+  Object.assign(popover, { el, anchorKey: anchor.dataset.menuKey || null, build, pick, anchor, items, openedAt: performance.now() });
   anchor.setAttribute("aria-expanded", "true");
   placePopover(anchor);
   const btns = $$("button:not([disabled])", el);
@@ -167,7 +167,11 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Tab") closePopover();
 }, true);
 window.addEventListener("resize", closePopover);
-document.addEventListener("scroll", (e) => { if (!popover.el?.contains(e.target)) closePopover(); }, true);
+// Scrolling closes the menu, except the scroll the browser does to bring its button into view.
+document.addEventListener("scroll", (e) => {
+  if (popover.el?.contains(e.target) || performance.now() - (popover.openedAt || 0) < 250) return;
+  closePopover();
+}, true);
 
 /* ---------- Styled selects ---------- */
 // Keeps the native <select> (forms, values, change events) and draws a matching button + popover.

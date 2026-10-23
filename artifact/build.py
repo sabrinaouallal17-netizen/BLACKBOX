@@ -30,6 +30,9 @@ for name, code in scripts.items():
 # Only CDN libraries the Artifact page allows may stay external.
 assert not re.search(r'<script[^>]+src="(?!https://cdn\.jsdelivr\.net/npm/)', html), "a script was not inlined"
 
+# The installable-app files (manifest, icons, service worker) only exist on the hosted edition.
+html = re.sub(r'\s*<link rel="(manifest|icon|apple-touch-icon)"[^>]*>|\s*<meta name="apple-mobile-web-app[^>]*>', "", html)
+
 # The Artifact publisher adds its own document skeleton.
 html = re.sub(r"<!doctype html>\s*|</?html[^>]*>\s*|</?head>\s*|</?body>\s*", "", html, flags=re.I)
 html = re.sub(r'<meta charset[^>]*>\s*|<meta name="viewport"[^>]*>\s*', "", html)
