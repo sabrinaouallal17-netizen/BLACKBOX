@@ -35,9 +35,12 @@ service cloud.firestore {
       let after = request.resource.data;
       return after.ownerId == before.ownerId
         && before.ownerId in after.memberIds
-        // Only the owner removes other people; anyone can remove themselves (leave).
+        // Only the owner adds or removes other people and edits their member entries;
+        // anyone else can only leave and update their own entry.
         && (request.auth.uid == before.ownerId
-            || after.memberIds.toSet().hasAll(before.memberIds.toSet().difference([request.auth.uid].toSet())));
+            || (after.memberIds.toSet().hasAll(before.memberIds.toSet().difference([request.auth.uid].toSet()))
+                && after.memberIds.toSet().difference(before.memberIds.toSet()).size() == 0
+                && after.members.diff(before.members).affectedKeys().hasOnly([request.auth.uid])));
     }
 
     // Profiles (photo, name, role, contact email) are visible to signed-in people; each person edits their own.
@@ -69,7 +72,9 @@ service cloud.firestore {
         allow read, write: if isMember(project());
       }
       match /activity/{entryId} {
-        allow read, delete: if isMember(project());
+        allow read: if isMember(project());
+        // The log can't be erased by the people it records; only the owner (deleting the project) removes it.
+        allow delete: if isMember(project()) && project().ownerId == request.auth.uid;
         allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid;
       }
       match /messages/{messageId} {

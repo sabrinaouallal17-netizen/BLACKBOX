@@ -8,6 +8,17 @@ const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g
 const splitList = (s) => [...new Set(String(s || "").split(",").map((x) => x.trim()).filter(Boolean))].slice(0, 12);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Only URLs the app itself produces may reach src, href or CSS: uploaded files, inline images, https.
+// Stored data can be written by any member, so this runs at render time, never trusting the database.
+function safeUrl(u) {
+  const s = String(u || "").trim();
+  if (/^\/_blob\/[A-Za-z0-9_.~-]+$/.test(s)) return s;
+  if (/^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=]+$/i.test(s)) return s;
+  if (/^https:\/\/[^\s"'<>()\\]+$/i.test(s)) return s;
+  return "";
+}
+const src = (u) => esc(safeUrl(u));
+
 function timeAgo(t) {
   const m = Math.round((Date.now() - t) / 60000);
   if (m < 1) return "just now";
@@ -88,7 +99,7 @@ function openPopover(anchor, build, pick, { focus } = {}) {
   if (el.parentElement !== host) host.appendChild(el);
   const items = build();
   el.innerHTML = items.map((it, i) => it.sep ? "<hr>" : `<button type="button" role="menuitem" data-pi="${i}" class="${it.danger ? "danger-text" : ""} ${it.selected ? "selected" : ""}" ${it.disabled ? "disabled" : ""}>
-    ${it.img ? `<img class="pi-img" src="${esc(it.img)}" alt="">` : it.icon ? icon(it.icon, 16) : ""}<span class="pi-label">${esc(it.label)}</span>${it.selected ? `<span class="pi-check">${icon("checkSmall", 15, 2.2)}</span>` : ""}</button>`).join("");
+    ${it.img ? `<img class="pi-img" src="${src(it.img)}" alt="">` : it.icon ? icon(it.icon, 16) : ""}<span class="pi-label">${esc(it.label)}</span>${it.selected ? `<span class="pi-check">${icon("checkSmall", 15, 2.2)}</span>` : ""}</button>`).join("");
   el.hidden = false;
   Object.assign(popover, { el, anchorKey: anchor.dataset.menuKey || null, build, pick, anchor, items });
   anchor.setAttribute("aria-expanded", "true");
@@ -160,6 +171,7 @@ function upgradeSelects(root = document) {
     btn.className = `cselect ${sel.dataset.csClass || ""}`;
     btn.setAttribute("aria-haspopup", "listbox");
     if (sel.id) btn.id = `cs-${sel.id}`;
+    btn.dataset.menuKey = `cs:${sel.id || sel.name || Math.random().toString(36).slice(2)}`;
     if (sel.getAttribute("aria-label")) btn.setAttribute("aria-label", sel.getAttribute("aria-label"));
     sel.after(btn);
     btn.addEventListener("click", () => {
@@ -178,14 +190,15 @@ function refreshSelect(sel) {
   const btn = sel.nextElementSibling;
   if (!btn?.classList.contains("cselect")) return;
   const o = sel.options[sel.selectedIndex];
-  btn.innerHTML = `${o?.dataset.img ? `<img class="pi-img" src="${esc(o.dataset.img)}" alt="">` : ""}<span class="cs-label">${esc(o ? o.textContent : "")}</span>${icon("chevron", 16)}`;
+  btn.innerHTML = `${o?.dataset.img ? `<img class="pi-img" src="${src(o.dataset.img)}" alt="">` : ""}<span class="cs-label">${esc(o ? o.textContent : "")}</span>${icon("chevron", 16)}`;
 }
 const refreshSelects = (root = document) => $$("select[data-cs]", root).forEach(refreshSelect);
 
 /* ---------- Lightbox ---------- */
-function openLightbox(src, caption = "") {
+function openLightbox(url, caption = "") {
+  if (!safeUrl(url)) return;
   const lb = $("#lightbox");
-  lb.innerHTML = `<figure><img src="${esc(src)}" alt="${esc(caption)}">${caption ? `<figcaption>${esc(caption)}</figcaption>` : ""}</figure><button class="icon-btn round lb-close" title="Close">${icon("x", 20)}</button>`;
+  lb.innerHTML = `<figure><img src="${src(url)}" alt="${esc(caption)}">${caption ? `<figcaption>${esc(caption)}</figcaption>` : ""}</figure><button class="icon-btn round lb-close" title="Close">${icon("x", 20)}</button>`;
   lb.hidden = false;
   lb.querySelector(".lb-close").focus();
 }
@@ -199,16 +212,17 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#lig
 /* ---------- Chat formatting (Discord-style markdown, safe) ---------- */
 function formatMessage(text) {
   const blocks = [];
-  // Pull code out first so nothing inside it gets formatted.
-  let s = String(text || "").replace(/```(?:[a-z0-9]*\n)?([\s\S]*?)```/gi, (_, code) => `\u0000${blocks.push(`<pre><code>${esc(code.replace(/\n$/, ""))}</code></pre>`) - 1}\u0000`);
-  s = s.replace(/`([^`\n]+)`/g, (_, code) => `\u0000${blocks.push(`<code>${esc(code)}</code>`) - 1}\u0000`);
+  const keep = (html) => `\u0000${blocks.push(html) - 1}\u0000`;
+  // Pull code and links out first so nothing inside them gets formatted.
+  let s = String(text || "").replace(/\u0000/g, "").replace(/```(?:[a-z0-9]*\n)?([\s\S]*?)```/gi, (_, code) => `\u0000${blocks.push(`<pre><code>${esc(code.replace(/\n$/, ""))}</code></pre>`) - 1}\u0000`);
+  s = s.replace(/`([^`\n]+)`/g, (_, code) => keep(`<code>${esc(code)}</code>`));
+  s = s.replace(/https?:\/\/[^\s<>"'`\u0000]+[^\s<>"'`\u0000.,:;)\]]/g, (url) => keep(`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`));
   s = esc(s);
   s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
     .replace(/__([^_\n]+)__/g, "<u>$1</u>")
     .replace(/~~([^~\n]+)~~/g, "<s>$1</s>")
     .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>")
-    .replace(/(^|[^\w_])_([^_\n]+)_(?![\w_])/g, "$1<em>$2</em>")
-    .replace(/(https?:\/\/[^\s<]+[^\s<.,:;"')\]])/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+    .replace(/(^|[^\w_])_([^_\n]+)_(?![\w_])/g, "$1<em>$2</em>");
   s = s.split("\n").map((line) => (line.startsWith("&gt; ") ? `<span class="md-quote">${line.slice(5)}</span>` : line)).join("\n");
   return s.replace(/\u0000(\d+)\u0000/g, (_, i) => blocks[+i]);
 }
@@ -261,7 +275,7 @@ const isGif = (f) => f?.type === "image/gif" || /\.gif$/i.test(f?.name || "");
 const drafts = {};
 document.addEventListener("input", (e) => {
   const el = e.target;
-  if (el.id && el.closest("[data-drafts]")) drafts[el.id] = el.type === "checkbox" ? el.checked : el.value;
+  if (el.id && el.type !== "password" && el.closest("[data-drafts]")) drafts[el.id] = el.type === "checkbox" ? el.checked : el.value;
 });
 document.addEventListener("change", (e) => {
   const el = e.target;
@@ -275,6 +289,7 @@ function restoreDrafts(root) {
     else if (el.value !== value) el.value = value;
   }
 }
+const clearAllDrafts = () => { for (const k of Object.keys(drafts)) delete drafts[k]; };
 function clearDrafts(form) {
   for (const el of $$("[id]", form)) delete drafts[el.id];
 }

@@ -108,11 +108,12 @@ window.BLACKBOX_ARTIFACT = true;
     return {
       where: (f, op, v) => {
         const nq = q.where(f, op, v);
-        return wrapQuery(col, nq, { ...opts, pre: opts.order ? opts.pre : nq });
+        return wrapQuery(col, nq, { ...opts, pre: opts.order ? opts.pre.where(f, op, v) : nq });
       },
       orderBy: (f, dir = "asc") => wrapQuery(col, q.orderBy(f, dir), { ...opts, pre: opts.pre || q, order: [f, dir] }),
       limit: (n) => wrapQuery(col, q.limit(n), opts),
       limitToLast: (n) => {
+        if (!opts.order) throw new TypeError("limitToLast needs an orderBy first");
         const [f, dir] = opts.order;
         return wrapQuery(col, opts.pre.orderBy(f, dir === "asc" ? "desc" : "asc").limit(n), { ...opts, reverse: true });
       },

@@ -293,6 +293,30 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
     return out;
   }, aliceUid);
   ok(Object.values(r).every((v) => v === 'permission-denied'), 'rules block editing others: ' + JSON.stringify(r));
+  const r2 = await B.evaluate(async (uid) => {
+    const out = {};
+    const act = (await projectsCol().doc(currentId).collection('activity').limit(1).get()).docs[0];
+    try { await act.ref.delete(); out.deleteLog = 'allowed'; } catch (e) { out.deleteLog = e.code; }
+    try { await projectsCol().doc(currentId).update({ [`members.${uid}.name`]: 'Mallory' }); out.renameOther = 'allowed'; } catch (e) { out.renameOther = e.code; }
+    try { await projectsCol().doc(currentId).update({ memberIds: firebase.firestore.FieldValue.arrayUnion('someone-else') }); out.addMember = 'allowed'; } catch (e) { out.addMember = e.code; }
+    return out;
+  }, aliceUid);
+  ok(Object.values(r2).every((v) => v === 'permission-denied'), 'rules block erasing the log, renaming others, adding members: ' + JSON.stringify(r2));
+  // Hostile data written straight to the database is never rendered as a link, script or CSS
+  B.expectDenied = false;
+  await B.evaluate(async () => {
+    await projectsCol().doc(currentId).collection('messages').add({ uid: user.uid, name: 'Bob', text: 'see file', at: Date.now(), attachments: [
+      { url: "javascript:window.__pwned=1", type: 'text/plain', name: 'evil.pdf', size: 1 },
+      { url: "javascript:window.__pwned=2", type: 'image/png', name: 'evil.png', size: 1 }] });
+    await projectsCol().doc(currentId).update({ thumbnail: "x');position:fixed;inset:0;background:url('https://evil.test/a.png" });
+  });
+  await go(A, 'chat', '#chat-text'); await A.waitForSelector('text=evil.pdf');
+  ok(await A.evaluate(() => !document.querySelector('[href^="javascript"], [src^="javascript"], [data-lightbox^="javascript"]')), 'javascript: URLs are never rendered');
+  await A.click('.att-file'); await A.waitForTimeout(300);
+  ok(await A.evaluate(() => !window.__pwned), 'clicking a hostile attachment runs nothing');
+  await go(A, 'overview');
+  ok(await A.locator('.banner').count() === 0 || !(await A.getAttribute('.banner', 'style')).includes('position'), 'hostile thumbnail value is not injected into CSS');
+  await A.evaluate(async () => projectsCol().doc(currentId).update({ thumbnail: '' }));
 
   // Activity
   await go(A, 'activity', '.act-list');

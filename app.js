@@ -163,7 +163,7 @@ function avatar(uid, size = 36, name = memberName(uid)) {
   const hue = h % 360;
   const ring = `box-shadow:0 0 0 1.5px hsl(${hue} 80% 65% / .35)`;
   const photo = profiles[uid]?.avatar;
-  if (photo) return `<span class="avatar photo" style="width:${size}px;height:${size}px;${ring}" title="${esc(name)}"><img src="${esc(photo)}" alt=""></span>`;
+  if (photo) return `<span class="avatar photo" style="width:${size}px;height:${size}px;${ring}" title="${esc(name)}"><img src="${src(photo)}" alt=""></span>`;
   const color = `hsl(${hue} 80% 65%)`;
   const accent = `hsl(${hue} 60% 22%)`;
   let rects = "";
@@ -180,7 +180,7 @@ function folderArt(seed) {
   return `<svg viewBox="0 0 92 92" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="92" height="92" fill="hsl(${hue} 30% 14%)"/><path d="M28 34a3 3 0 0 1 3-3h10l5 5h15a3 3 0 0 1 3 3v19a3 3 0 0 1-3 3H31a3 3 0 0 1-3-3z" fill="hsl(${hue} 55% 30%)" stroke="hsl(${hue} 70% 70%)" stroke-width="2.5"/></svg>`;
 }
 const gameIcon = (p, size = 40) => p.icon
-  ? `<img class="game-icon" src="${esc(p.icon)}" alt="" style="width:${size}px;height:${size}px">`
+  ? `<img class="game-icon" src="${src(p.icon)}" alt="" style="width:${size}px;height:${size}px">`
   : `<span class="game-icon blank" style="width:${size}px;height:${size}px">${icon("gamepad", Math.round(size * 0.5))}</span>`;
 
 /* ---------- Files ---------- */
@@ -208,7 +208,7 @@ async function storeFile(file, purpose) {
     return { url: up.url, name: file.name, type: blob.type || file.type, size: up.sizeBytes || blob.size, width, height };
   }
   if (!image) throw fail("unsupported", `${file.name}: only images and GIFs can be shared in this version.`);
-  if (gif) {
+  if (gif && !rule.square && purpose !== "thumbnail") {
     if (file.size > 600 * 1024) throw fail("too_large", `${file.name} is over 600 KB. Use a smaller GIF.`);
     const { width, height } = await imageSize(file);
     return { url: await readAsDataURL(file), name: file.name, type: "image/gif", size: file.size, width, height };
@@ -280,16 +280,13 @@ function watchProjects() {
       snap.forEach((d) => { projects[d.id] = d.data(); });
       gotFirst = true;
       if (!ARTIFACT && !emailsSynced) { emailsSynced = true; syncMemberEmails(); }
+      watchProfiles([m.uid, ...Object.values(projects).flatMap((p) => p.memberIds || [])]);
       if (!projects[currentId]) selectProject(pickDefaultProject());
       else if (subscribedId !== currentId) selectProject(currentId);
       else render();
     }, (e) => { console.error("BLACKBOX: projects listener", e); toast(friendlyError(e), true); }),
-    db.collection("profiles").onSnapshot((snap) => {
-      profiles = {};
-      snap.forEach((d) => { profiles[d.id] = d.data(); });
-      if (gotFirst) render();
-    }, (e) => console.error("BLACKBOX: profiles listener", e)),
   ];
+  watchProfiles([m.uid]);
   if (!ARTIFACT) {
     unsubProjects.push(projectsCol().where("invitedEmails", "array-contains", m.email).onSnapshot((snap) => {
       invites = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -297,6 +294,20 @@ function watchProjects() {
     }, (e) => console.error("BLACKBOX: invites listener", e)));
   }
 }
+// Profiles of the people you work with only (one listener each), not every account.
+const profileUnsubs = new Map();
+function watchProfiles(ids) {
+  const want = new Set(ids.filter(Boolean));
+  for (const [id, unsub] of profileUnsubs) if (!want.has(id)) { unsub(); profileUnsubs.delete(id); delete profiles[id]; }
+  for (const id of want) {
+    if (profileUnsubs.has(id)) continue;
+    profileUnsubs.set(id, db.collection("profiles").doc(id).onSnapshot((d) => {
+      if (d.exists) profiles[id] = d.data(); else delete profiles[id];
+      render();
+    }, (e) => console.error("BLACKBOX: profile listener", e)));
+  }
+}
+
 // After a sign-in email change, keep the address teammates see up to date.
 function syncMemberEmails() {
   const m = me();
@@ -351,8 +362,12 @@ function selectProject(id) {
   unsubActivity = null;
   tasks = []; activity = []; messages = []; items = []; assets = [];
   taskFilter = { status: "all", owner: "all" };
+  activityFilter = { type: "all", who: "all" };
+  assetFilter = { kind: "all", q: "" };
+  itemQuery = "";
   activityLimit = 100;
   chatPending = []; editingMsg = null;
+  clearAllDrafts(); // unsaved text belongs to the project it was typed in
   currentId = id;
   subscribedId = id;
   if (id) storeSet("blackbox:project", id);
@@ -391,10 +406,12 @@ async function migrateLegacyItems() {
   migrating = true;
   await act(async () => {
     let t = Date.now();
-    for (const c of p.collections) for (const name of c.items || []) {
-      await sub("items").add({ collectionId: c.id, name: String(name).slice(0, 60), desc: "", image: "", createdBy: p.ownerId, createdAt: t++ });
+    // Fixed ids: if two people migrate at once, or a retry repeats it, each item is written once.
+    for (const c of p.collections) for (const [i, name] of (c.items || []).entries()) {
+      await sub("items").doc(`legacy-${c.id}-${i}`).set({ collectionId: c.id, name: String(name).slice(0, 60), desc: "", image: "", createdBy: p.ownerId, createdAt: t++ });
     }
-    await updateProject({ collections: p.collections.map(({ items: _old, ...c }) => c) });
+    // Strip the old lists from the collections as they are now, keeping edits made meanwhile.
+    await updateProject({ collections: (project()?.collections || []).map(({ items: _old, ...c }) => c) });
   });
   migrating = false;
 }
@@ -478,7 +495,7 @@ function header(title, crumb, { full = false, actions = true } = {}) {
       <div class="head-text"><div class="crumbs">${gameIcon(p, 22)}<span>${esc(p.name)}</span><span>/</span><b>${esc(crumb || title)}</b></div><h1>${esc(title)}</h1></div>
       ${actions ? headerActions(p) : ""}</div>`;
   }
-  return `${p.thumbnail ? `<div class="banner" style="background-image:url('${esc(p.thumbnail)}')"></div>` : ""}
+  return `${p.thumbnail ? `<div class="banner" style="background-image:url('${src(p.thumbnail)}')"></div>` : ""}
     <div class="crumbs">Workspace <span>/</span> <b>${esc(p.name)}</b></div>
     <div class="head ${p.thumbnail ? "over-banner" : ""}">
       ${gameIcon(p, 72)}
@@ -540,7 +557,7 @@ function viewOverview() {
           <div class="card-body">${colls.length ? `<div class="collections">${colls.map((c) => {
             const its = items.filter((x) => x.collectionId === c.id);
             const cover = its.find((x) => x.image)?.image;
-            return `<a class="coll" href="#collection.${esc(c.id)}"><div class="coll-cover">${cover ? `<img src="${esc(cover)}" alt="" loading="lazy">` : folderArt(c.id)}</div>
+            return `<a class="coll" href="#collection.${esc(c.id)}"><div class="coll-cover">${cover ? `<img src="${src(cover)}" alt="" loading="lazy">` : folderArt(c.id)}</div>
               <div class="coll-text"><div class="name ellipsis">${esc(c.name)}</div>${c.desc ? `<div class="desc">${esc(c.desc)}</div>` : ""}<div class="n">${its.length} item${its.length === 1 ? "" : "s"}</div></div></a>`;
           }).join("")}</div>` : '<div class="empty">Group assets like characters, maps or icons into collections.</div>'}</div>
         </section>
@@ -667,7 +684,7 @@ function viewChat() {
               <button type="button" class="icon-btn bare round-sm ${gifOpen ? "on" : ""}" data-action="toggle-gifs" title="GIFs">${icon("gif", 21)}</button>
               ${gifOpen ? `<div class="gif-panel" role="dialog" aria-label="GIFs">
                 <div class="gif-head"><b>GIFs</b><button type="button" class="btn small" data-pick="gif">${icon("upload", 15)}Upload GIF</button></div>
-                ${gifs.length ? `<div class="gif-grid">${gifs.map((g) => `<button type="button" class="gif-pick" data-send-gif="${esc(g.id)}" title="${esc(g.name)}"><img src="${esc(g.url)}" alt="${esc(g.name)}" loading="lazy"></button>`).join("")}</div>` : '<p class="muted small">No GIFs yet. Upload one and it stays here for the whole team.</p>'}
+                ${gifs.length ? `<div class="gif-grid">${gifs.map((g) => `<button type="button" class="gif-pick" data-send-gif="${esc(g.id)}" title="${esc(g.name)}"><img src="${src(g.url)}" alt="${esc(g.name)}" loading="lazy"></button>`).join("")}</div>` : '<p class="muted small">No GIFs yet. Upload one and it stays here for the whole team.</p>'}
               </div>` : ""}
             </div>
             <button class="btn primary send-btn" ${chatSending ? "disabled" : ""} title="Send">${chatSending ? icon("spinner", 18) : icon("send", 18)}</button>
@@ -683,8 +700,8 @@ function viewChat() {
 function attachmentsHtml(list) {
   if (!list?.length) return "";
   return `<div class="atts ${list.length > 1 ? "multi" : ""}">${list.map((a) => isImageType(a.type)
-    ? `<button type="button" class="att-img" data-lightbox="${esc(a.url)}" data-caption="${esc(a.name)}"><img src="${esc(a.url)}" alt="${esc(a.name)}" loading="lazy" ${a.width ? `width="${a.width}" height="${a.height}"` : ""}></button>`
-    : `<a class="att-file" href="${esc(a.url)}" target="_blank" rel="noopener">${icon("file", 22)}<span><b class="ellipsis">${esc(a.name)}</b><span class="muted small">${formatSize(a.size)}</span></span></a>`).join("")}</div>`;
+    ? `<button type="button" class="att-img" data-lightbox="${src(a.url)}" data-caption="${esc(a.name)}"><img src="${src(a.url)}" alt="${esc(a.name)}" loading="lazy" ${a.width ? `width="${a.width}" height="${a.height}"` : ""}></button>`
+    : `<${safeUrl(a.url) ? `a href="${src(a.url)}" target="_blank" rel="noopener"` : "span"} class="att-file">${icon("file", 22)}<span><b class="ellipsis">${esc(a.name)}</b><span class="muted small">${formatSize(a.size)}</span></span></${safeUrl(a.url) ? "a" : "span"}>`).join("")}</div>`;
 }
 function isChatAtBottom() {
   const el = $("#chat-log");
@@ -711,12 +728,12 @@ function viewCollection(id) {
     ? `<button type="button" class="dropzone big" data-drop="items" data-pick="items" data-collection="${esc(c.id)}">${icon("images", 34)}<b>${total ? "No items match your search." : "Drop images here to add items"}</b><span class="muted">${total ? "Try another search, or " : "Each image becomes an item named after the file. You can also "}<span class="link">choose files</span></span></button>`
     : mode === "grid"
       ? `<div class="item-grid" data-drop="items" data-collection="${esc(c.id)}">${list.map((x) => `<article class="item-card" data-item="${esc(x.id)}">
-          ${x.image ? `<img src="${esc(x.image)}" alt="" loading="lazy">` : `<div class="item-noimg">${folderArt(x.id)}</div>`}
+          ${x.image ? `<img src="${src(x.image)}" alt="" loading="lazy">` : `<div class="item-noimg">${folderArt(x.id)}</div>`}
           <div class="item-info"><div class="item-name">${esc(x.name)}</div>${x.desc ? `<div class="item-desc">${esc(x.desc)}</div>` : ""}</div>
           ${itemMenu(x)}
         </article>`).join("")}</div>`
       : `<div class="table-wrap" data-drop="items" data-collection="${esc(c.id)}"><table class="table item-table"><thead><tr><th>Item</th><th>Added by</th><th>Date</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>
-          ${list.map((x) => `<tr data-item="${esc(x.id)}"><td><div class="task-cell"><span class="item-thumb">${x.image ? `<img src="${esc(x.image)}" alt="" loading="lazy">` : icon("image", 20)}</span><div class="task-text"><div class="task-title">${esc(x.name)}</div>${x.desc ? `<div class="task-desc">${esc(x.desc)}</div>` : ""}</div></div></td>
+          ${list.map((x) => `<tr data-item="${esc(x.id)}"><td><div class="task-cell"><span class="item-thumb">${x.image ? `<img src="${src(x.image)}" alt="" loading="lazy">` : icon("image", 20)}</span><div class="task-text"><div class="task-title">${esc(x.name)}</div>${x.desc ? `<div class="task-desc">${esc(x.desc)}</div>` : ""}</div></div></td>
             <td><div class="owner">${avatar(x.createdBy, 30)}<span class="ellipsis">${esc(memberName(x.createdBy))}</span></div></td><td class="muted nowrap">${timeAgo(x.createdAt)}</td><td class="menu-cell">${itemMenu(x)}</td></tr>`).join("")}
         </tbody></table></div>`;
   return `${header(c.name, "Collections")}
@@ -755,7 +772,7 @@ function viewAssets() {
         </div>
       </div>
       ${list.length ? `<div class="asset-grid" data-drop="assets">${list.map((a) => `<article class="asset-card" data-asset="${esc(a.id)}">
-          <button type="button" class="asset-preview" ${isImageType(a.type) ? `data-lightbox="${esc(a.url)}" data-caption="${esc(a.name)}"` : ""}>${isImageType(a.type) ? `<img src="${esc(a.url)}" alt="" loading="lazy">` : icon("file", 40)}</button>
+          <button type="button" class="asset-preview" ${isImageType(a.type) ? `data-lightbox="${src(a.url)}" data-caption="${esc(a.name)}"` : ""}>${isImageType(a.type) ? `<img src="${src(a.url)}" alt="" loading="lazy">` : icon("file", 40)}</button>
           <div class="asset-info">
             <div class="asset-name ellipsis" title="${esc(a.name)}">${esc(a.name)}</div>
             <div class="asset-meta"><span class="kind-chip">${icon(ASSET_KINDS[a.kind]?.icon || "file", 13)}${ASSET_KINDS[a.kind]?.one || "File"}</span>${a.width ? `<span>${a.width}×${a.height}</span>` : ""}<span>${formatSize(a.size)}</span></div>
@@ -819,7 +836,7 @@ function viewProjectSettings() {
         <section class="card">
           <div class="card-head"><h2>Game icon</h2></div>
           <div class="card-body brand-row">
-            <button type="button" class="brand-pick icon-pick" data-drop="brand-icon" data-pick="icon" title="Upload icon">${p.icon ? `<img src="${esc(p.icon)}" alt="Game icon">` : `<span class="muted">${icon("upload", 22)}</span>`}</button>
+            <button type="button" class="brand-pick icon-pick" data-drop="brand-icon" data-pick="icon" title="Upload icon">${p.icon ? `<img src="${src(p.icon)}" alt="Game icon">` : `<span class="muted">${icon("upload", 22)}</span>`}</button>
             <div class="brand-text"><p class="muted small">Square image, shown next to the game name. Drop a file or click to upload.</p>
               <div class="row-gap">${assetChooser("icon")}${p.icon ? '<button class="btn ghost small" data-action="remove-icon">Remove</button>' : ""}</div></div>
           </div>
@@ -827,7 +844,7 @@ function viewProjectSettings() {
         <section class="card">
           <div class="card-head"><h2>Thumbnail</h2></div>
           <div class="card-body">
-            <button type="button" class="brand-pick thumb-pick" data-drop="brand-thumbnail" data-pick="thumbnail" title="Upload thumbnail">${p.thumbnail ? `<img src="${esc(p.thumbnail)}" alt="Thumbnail">` : `<span class="muted">${icon("images", 26)}<span>Drop a 16:9 image or click to upload</span></span>`}</button>
+            <button type="button" class="brand-pick thumb-pick" data-drop="brand-thumbnail" data-pick="thumbnail" title="Upload thumbnail">${p.thumbnail ? `<img src="${src(p.thumbnail)}" alt="Thumbnail">` : `<span class="muted">${icon("images", 26)}<span>Drop a 16:9 image or click to upload</span></span>`}</button>
             <div class="row-gap spaced-sm">${assetChooser("thumbnail")}${p.thumbnail ? '<button class="btn ghost small" data-action="remove-thumbnail">Remove</button>' : ""}</div>
           </div>
         </section>
@@ -930,7 +947,7 @@ function renderSidebar() {
   const r = route();
   const ids = Object.keys(projects).sort((a, b) => projects[a].name.localeCompare(projects[b].name));
   const sel = $("#project-select");
-  sel.innerHTML = ids.map((id) => `<option value="${esc(id)}" ${projects[id].icon ? `data-img="${esc(projects[id].icon)}"` : ""} ${id === currentId ? "selected" : ""}>${esc(projects[id].name)}</option>`).join("");
+  sel.innerHTML = ids.map((id) => `<option value="${esc(id)}" ${projects[id].icon ? `data-img="${src(projects[id].icon)}"` : ""} ${id === currentId ? "selected" : ""}>${esc(projects[id].name)}</option>`).join("");
   refreshSelect(sel);
   for (const id of ["project-picker", "side-nav", "side-collections-section", "side-team-section"]) $(`#${id}`).hidden = !p;
   const m = me();
@@ -946,8 +963,10 @@ function renderSidebar() {
 
 function render() {
   if (!user) return;
-  const menuState = popoverState();
-  closePopover();
+  // Menus anchored in the view follow the re-render; others (sidebar, dialogs) stay open untouched.
+  const anchoredInView = popover.anchor && $("#view").contains(popover.anchor);
+  const menuState = anchoredInView ? popoverState() : null;
+  if (anchoredInView) closePopover();
   // Keep focus and caret when a live update re-renders the view.
   const focused = document.activeElement;
   const keep = focused && focused.id && $("#view").contains(focused)
@@ -1018,14 +1037,15 @@ async function moveTask(id, dir, key) {
   const i = ids.indexOf(id);
   const j = i + dir;
   if (i < 0 || j < 0 || j >= ids.length) return;
-  const a = tasks.find((t) => t.id === id);
-  const b = tasks.find((t) => t.id === ids[j]);
-  let newA = b.order ?? 0;
-  const newB = a.order ?? 0;
-  if (newA === newB) newA = newB + dir * 0.5;
+  const vis = ids.map((x) => tasks.find((t) => t.id === x));
+  const a = vis[i];
+  let orders = vis.map((t) => t.order ?? 0);
+  // Equal orders (older tasks) can't be swapped meaningfully: number the visible list first.
+  if (new Set(orders).size !== orders.length) orders = orders.map((_, k) => k + 1);
+  const next = orders.slice();
+  [next[i], next[j]] = [orders[j], orders[i]];
   const batch = db.batch();
-  batch.update(sub("tasks").doc(a.id), { order: newA });
-  batch.update(sub("tasks").doc(b.id), { order: newB });
+  vis.forEach((t, k) => { if ((t.order ?? 0) !== next[k]) batch.update(sub("tasks").doc(t.id), { order: next[k] }); });
   if (await act(() => batch.commit())) log("task.move", dir < 0 ? "moved up" : "moved down", a.title, a.type === "bug" ? "Bugs" : "Tasks");
 }
 
@@ -1111,11 +1131,12 @@ function openItem(collectionId, id = null, file = null) {
   $("#item-name").focus();
 }
 function renderItemPreview() {
-  const src = itemEdit.preview || itemEdit.image;
-  $("#item-image-preview").innerHTML = src
-    ? `<img src="${esc(src)}" alt=""><span class="change-hint">${icon("upload", 16)}Change image</span>`
+  // A fresh pick is a local blob: preview; a saved image goes through safeUrl.
+  const url = itemEdit.preview || safeUrl(itemEdit.image);
+  $("#item-image-preview").innerHTML = url
+    ? `<img src="${esc(url)}" alt=""><span class="change-hint">${icon("upload", 16)}Change image</span>`
     : `<span class="muted">${icon("image", 30)}<span>Drop an image or click to choose</span></span>`;
-  $("#item-remove-image").hidden = !src;
+  $("#item-remove-image").hidden = !url;
 }
 function setItemFile(file) {
   if (!isImageType(file.type)) return toast("Choose an image file.", true);
@@ -1173,23 +1194,27 @@ async function addItemsFromFiles(collectionId, files) {
 
 /* ---------- Assets ---------- */
 async function uploadAssets(files, kind) {
-  let done = 0;
+  const created = [];
   for (const f of files) {
     const k = isGif(f) ? "gif" : kind;
-    const ok = await act(async () => {
+    const doc = await act(async () => {
       const up = await storeFile(f, k === "icon" ? "icon" : k === "thumbnail" ? "thumbnail" : "asset");
-      await sub("assets").add({ name: f.name.slice(0, 100), kind: isImageType(up.type) ? k : "other", url: up.url, type: up.type, size: up.size, width: up.width || 0, height: up.height || 0, uid: user.uid, at: Date.now() });
+      const data = { name: f.name.slice(0, 100), kind: isImageType(up.type) ? k : "other", url: up.url, type: up.type, size: up.size, width: up.width || 0, height: up.height || 0, uid: user.uid, at: Date.now() };
+      await sub("assets").add(data);
+      return data;
     });
-    if (ok) done++;
+    if (doc) created.push(doc);
   }
+  const done = created.length;
   if (done) {
     toast(`${done} file${done === 1 ? "" : "s"} uploaded`);
-    log("asset.upload", done === 1 ? "uploaded" : `uploaded ${done} files`, done === 1 ? files[0].name : "", "Assets");
+    log("asset.upload", done === 1 ? "uploaded" : `uploaded ${done} files`, done === 1 ? created[0].name : "", "Assets");
   }
-  return done;
+  return created;
 }
 
 async function setBranding(field, url, label) {
+  if (url && !safeUrl(url)) return toast("This image can't be used.", true);
   if (await act(() => updateProject({ [field]: url }), url ? `${label} updated` : `${label} removed`)) {
     log("project.branding", url ? `changed the game ${label.toLowerCase()}` : `removed the game ${label.toLowerCase()}`, "", "Settings");
   }
@@ -1199,6 +1224,18 @@ async function uploadBranding(field, file) {
   const purpose = field === "icon" ? "icon" : "thumbnail";
   const up = await act(() => storeFile(file, purpose));
   if (up) await setBranding(field, up.url, field === "icon" ? "Icon" : "Thumbnail");
+}
+
+// Firebase keeps images inline, so an asset is re-compressed to icon or thumbnail size before it
+// goes into the project document (which every member downloads and which holds at most 1 MB).
+async function brandFromAsset(field, a) {
+  const label = field === "icon" ? "Icon" : "Thumbnail";
+  if (ARTIFACT) return setBranding(field, a.url, label);
+  const up = await act(async () => {
+    const blob = await (await fetch(safeUrl(a.url))).blob();
+    return storeFile(new File([blob], a.name, { type: blob.type }), field === "icon" ? "icon" : "thumbnail");
+  });
+  if (up) await setBranding(field, up.url, label);
 }
 
 function openAssetMenu(btn) {
@@ -1213,9 +1250,9 @@ function openAssetMenu(btn) {
     { id: "delete", label: "Delete", icon: "trash", danger: true, disabled: a.uid !== user.uid && !isOwner() },
   ], async (it) => {
     if (it.id === "view") openLightbox(a.url, a.name);
-    if (it.id === "open") window.open(a.url, "_blank", "noopener");
-    if (it.id === "icon") setBranding("icon", a.url, "Icon");
-    if (it.id === "thumb") setBranding("thumbnail", a.url, "Thumbnail");
+    if (it.id === "open" && safeUrl(a.url)) window.open(safeUrl(a.url), "_blank", "noopener");
+    if (it.id === "icon") brandFromAsset("icon", a);
+    if (it.id === "thumb") brandFromAsset("thumbnail", a);
     if (it.id === "rename") {
       const res = await ask({ title: "Rename asset", fields: [{ label: "Name", value: a.name, max: 100 }], ok: "Save" });
       if (res && res[0] && res[0] !== a.name && await act(() => sub("assets").doc(a.id).update({ name: res[0] }))) log("asset.update", "renamed", res[0], "Assets", { changes: [{ field: "Name", from: a.name, to: res[0] }] });
@@ -1280,21 +1317,30 @@ async function sendChat(form) {
   chatSending = true;
   render();
   const m = me();
-  const pending = chatPending;
-  const ok = await act(async () => {
+  const pending = chatPending.slice();
+  let textSent = false;
+  const sentFiles = new Set();
+  await act(async () => {
     const atts = [];
-    for (const f of pending) atts.push(await storeFile(f.file, "chat"));
-    const chunks = chunkAttachments(atts);
+    for (const f of pending) atts.push({ f, att: await storeFile(f.file, "chat") });
+    const chunks = chunkAttachments(atts.map((x) => x.att));
+    let k = 0;
     for (let i = 0; i < chunks.length; i++) {
       await sub("messages").add({ uid: m.uid, name: storedName(), text: i === 0 ? text : "", attachments: chunks[i], at: Date.now() + i });
+      // Remember what is already posted, so a retry after a failure never posts it twice.
+      if (i === 0) textSent = true;
+      for (let n = 0; n < chunks[i].length; n++) sentFiles.add(atts[k++].f);
     }
   });
   chatSending = false;
-  if (ok) {
-    pending.forEach((f) => f.preview && URL.revokeObjectURL(f.preview));
-    chatPending = chatPending.filter((f) => !pending.includes(f));
-    clearDrafts(form);
-    $("#chat-text").value = "";
+  for (const f of sentFiles) if (f.preview) URL.revokeObjectURL(f.preview);
+  chatPending = chatPending.filter((f) => !sentFiles.has(f));
+  // Only clear the box if it still holds what was sent; text typed meanwhile stays.
+  const box = $("#chat-text");
+  if (textSent && box) {
+    if (box.value.trim() === text) box.value = "";
+    else if (text && box.value.trimStart().startsWith(text)) box.value = box.value.trimStart().slice(text.length).trimStart();
+    if (box.value) drafts["chat-text"] = box.value; else delete drafts["chat-text"];
   }
   render();
   scrollChatDown();
@@ -1378,7 +1424,7 @@ function openAssetPicker(btn) {
   const target = btn.dataset.pickAsset;
   openPopover(btn, () => assets.filter((a) => isImageType(a.type)).slice(0, 30).map((a) => ({ id: a.id, label: a.name, img: a.url })), (it) => {
     const a = assets.find((x) => x.id === it.id);
-    if (a) setBranding(target, a.url, target === "icon" ? "Icon" : "Thumbnail");
+    if (a) brandFromAsset(target, a);
   });
 }
 
@@ -1489,7 +1535,7 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (d.removeRelease !== undefined) return updateRelease((r) => r.items.splice(+d.removeRelease, 1));
-  if (d.editMsg) { editingMsg = d.editMsg; render(); const t = $("#msg-edit-text"); if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); } return; }
+  if (d.editMsg) { editingMsg = d.editMsg; delete drafts["msg-edit-text"]; render(); const t = $("#msg-edit-text"); if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); } return; }
   if (d.deleteMsg) {
     if (!(await ask({ title: "Delete this message?", ok: "Delete", danger: true }))) return;
     return act(() => sub("messages").doc(d.deleteMsg).delete());
@@ -1589,11 +1635,8 @@ async function handleFiles(target, files, opts = {}) {
     const gif = files[0];
     if (!isGif(gif)) return toast("Choose a .gif file.", true);
     gifOpen = false;
-    const before = new Set(assets.map((a) => a.id));
-    if (await uploadAssets([gif], "gif")) {
-      const a = assets.find((x) => !before.has(x.id) && x.uid === user.uid && x.kind === "gif");
-      if (a) sendGif(a);
-    }
+    const [a] = await uploadAssets([gif], "gif");
+    if (a) sendGif(a);
   }
 }
 
@@ -1813,6 +1856,9 @@ function onAuth(u) {
   unsubProjects.forEach((f) => f());
   unsubCurrent.forEach((f) => f());
   unsubActivity?.();
+  profileUnsubs.forEach((f) => f());
+  profileUnsubs.clear();
+  clearAllDrafts();
   unsubProjects = []; unsubCurrent = []; unsubActivity = null;
   projects = {}; invites = []; profiles = {}; currentId = null; subscribedId = null;
   tasks = []; activity = []; messages = []; items = []; assets = [];
