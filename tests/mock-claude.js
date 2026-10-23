@@ -88,5 +88,9 @@
       return { id, url: "/_blob/" + id, sizeBytes: blob.size, contentType: blob.type };
     },
   } : null;
-  window.claude = { use: async (name) => (name === "db" ? db : name === "user" ? (viewer ? user : null) : name === "assets" ? assets : null) };
+  // Downloads: records what the page offered (the real viewer asks the person to confirm).
+  window.__downloads = [];
+  const downloads = { save: async ({ filename, data }) => { window.__downloads.push({ filename, size: data.size ?? data.length }); return { status: "saved" }; } };
+  const caps = { db, user: viewer ? user : null, assets, downloads };
+  window.claude = { use: async (name) => caps[name] ?? null };
 })();

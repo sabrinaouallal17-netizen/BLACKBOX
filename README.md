@@ -13,6 +13,13 @@ Une application pour gérer et planifier nos jeux en équipe : tâches, bugs, re
 - **Assets** : images, miniatures, icônes et GIF de l'équipe, filtres, aperçu, « utiliser comme icône ou miniature »
 - **Collections** : éléments avec image, vue grille (image et infos sur la carte) ou liste ; déposer plusieurs images crée un élément par image
 - **Activity** : journal complet de toutes les modifications, avec une icône par type, filtres par type et par membre, et le détail des changements (Statut : To do → Done)
+- **Rôles** : Owner, Admin, Member, Viewer (lecture et chat), appliqués dans l'interface et dans les règles Firebase
+- **Salons de chat** comme Discord, avec point « non lu » ; **@mentions** et **notifications** (mentions, tâches assignées, patch notes publiées, changement de rôle)
+- **Kanban** : vue Board pour les tâches et les bugs, cartes à glisser d'une colonne à l'autre (souris ou doigt)
+- **Updates** : patch notes du jeu (Nouveautés, Améliorations, Corrections, Équilibrage), pré-remplies avec les tâches terminées et les bugs corrigés
+- **Dossiers d'assets** et **téléchargement** des images (chat, aperçu, assets)
+- **Fluidité** : la page se met à jour sur place (bibliothèque [Idiomorph](https://github.com/bigskysoftware/idiomorph)), sans clignotement ; les messages apparaissent tout de suite pendant l'envoi
+- **What's new** : l'historique des versions de BLACKBOX, dans la barre latérale
 - **Sauvegarde** : tout est enregistré en ligne et partagé en temps réel ; l'indicateur en bas de la barre latérale affiche « All changes saved », « Saving… » ou « Offline ». Un texte en cours de saisie n'est pas effacé quand un coéquipier modifie quelque chose.
 
 Dans la version GitHub (Firebase), les images sont compressées et stockées dans la base (GIF jusqu'à 600 Ko), sans Firebase Storage, qui demande un abonnement payant. La version Artifact accepte des fichiers jusqu'à 20 Mo.
@@ -39,7 +46,7 @@ GitHub → **Settings → Pages** → Source **Deploy from a branch**, branche `
 
 Une deuxième édition tourne comme page Artifact sur claude.ai, sans Firebase : les comptes sont des comptes Claude et les données sont dans la base de la page. Le même `app.js` est utilisé ; `artifact/backend.js` remplace le SDK Firebase.
 
-- Construire la page : `python3 artifact/build.py blackbox.html`, puis la publier comme Artifact avec les capacités `db` (règle : chacun modifie son propre profil), `user` (portée `profile`) et `assets` (fichiers).
+- Construire la page : `python3 artifact/build.py blackbox.html`, puis la publier comme Artifact avec les capacités `db` (règle : chacun modifie son propre profil), `user` (portée `profile`), `assets` (fichiers) et `downloads` (téléchargements). Dans cette version, les rôles sont appliqués par l'interface seulement.
 - Inviter quelqu'un : menu **Share** de la page → invitation par email comme **Editor**. La personne ouvre le lien et clique **Join** sur le projet.
 - Toutes les personnes qui ont accès à la page voient tous les projets ; les accès en lecture seule ne peuvent rien modifier.
 - Test : `tests/artifact-e2e.js` avec la fausse plateforme `tests/mock-claude.js`.
@@ -77,6 +84,8 @@ PW=<chemin vers playwright> SDK=<chemin vers node_modules/firebase> OUT=/tmp nod
 - `app.js` : pages, actions et données (Firebase ou Artifact)
 - `ui.js` : menus, listes déroulantes, fenêtres, aperçu d'images, mise en forme du chat, images
 - `icons.js` : icônes de l'interface et des plateformes
+- `notify.js` : notifications et mentions ; `board.js` : Kanban ; `updates.js` : patch notes
+- `changelog.js` : What's new de BLACKBOX (à compléter à chaque changement) ; `boot.js` : démarrage
 - `firebase-config.js` : configuration du projet Firebase
 - `firestore.rules` : règles de sécurité de la base
 - `firebase.json` : configuration des émulateurs

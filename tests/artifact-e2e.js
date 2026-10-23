@@ -11,6 +11,7 @@ const blobs = new Map();
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
   await ctx.addInitScript({ path: MOCK });
+  await ctx.route(/cdn\.jsdelivr\.net\/npm\/idiomorph@[\d.]+\/dist\/idiomorph\.min\.js/, (route) => route.fulfill({ body: require('fs').readFileSync(process.env.IDIOMORPH), contentType: 'application/javascript' }));
   await ctx.route('**/__mock_upload/*', async (route) => {
     const id = route.request().url().split('/').pop();
     blobs.set(id, { body: route.request().postDataBuffer(), type: route.request().headers()['content-type'] });
@@ -99,8 +100,13 @@ const blobs = new Map();
   ok((await A.textContent('.msg-head b')) === 'Alice', 'own name resolved from account');
   await choose(A, '[data-pick=chat]', [file('a.png', await png(A, '#0ea5e9', 400, 300, 'A')), file('b.png', await png(A, '#22c55e', 400, 300, 'B'))]);
   await A.click('.send-btn');
-  await A.waitForFunction(() => document.querySelectorAll('.atts.multi .att-img img').length === 2);
+  await A.waitForSelector('.msg.outgoing', { state: 'detached' });
+  await A.waitForFunction(() => document.querySelectorAll('.atts.multi button.att-img img').length === 2);
   ok(true, 'images sent in chat');
+  await A.locator('.att-wrap').first().hover();
+  await A.locator('.att-wrap').first().locator('.att-dl').click();
+  await A.waitForFunction(() => window.__downloads.length === 1);
+  ok(/\.png$/.test(await A.evaluate(() => window.__downloads[0].filename)), 'download button offers the image through the viewer');
 
   // Profile
   await go(A, 'profile', '#prof-name');
@@ -129,6 +135,60 @@ const blobs = new Map();
   await A.waitForSelector('text=Hi Alice!');
   ok(true, 'chat syncs between viewers');
 
+  // Channels + unread, mentions + notifications
+  await A.evaluate(() => { location.hash = 'chat'; });
+  await A.waitForSelector('[data-action=new-channel]');
+  await A.click('[data-action=new-channel]'); await confirmAsk(A, 'art', 'Concept art');
+  await A.waitForSelector('.chan-head:has-text("art")');
+  await go(B, 'chat.general', '#chat-text');
+  await A.fill('#chat-text', 'new art!'); await A.press('#chat-text', 'Enter');
+  await B.waitForSelector('.chan-list a.unread[href="#chat.art"]');
+  ok(true, 'unread dot on a channel with new messages');
+  await B.fill('#chat-text', 'ping @Ali'); await B.waitForSelector('#mention-picker:not([hidden])'); await B.press('#chat-text', 'Enter');
+  await B.type('#chat-text', 'look'); await B.press('#chat-text', 'Enter');
+  await A.waitForSelector('#bell.has-dot');
+  await A.click('#bell');
+  ok((await A.textContent('.notif-panel')).includes('mentioned you'), 'mention notification');
+  await A.click('.np-item.unread');
+  await A.waitForSelector('.msg.mentioned');
+  ok(true, 'notification opens the mention');
+
+  // Kanban drag
+  await go(A, 'tasks', '[data-board-mode]');
+  await A.click('[data-board-mode=board]'); await A.waitForSelector('.board .kcard:has-text("T3")');
+  const cb = await A.locator('.kcard', { hasText: 'T3' }).boundingBox();
+  const tb = await A.locator('.kcol[data-kcol=review] .kcol-body').boundingBox();
+  await A.mouse.move(cb.x + 40, cb.y + 30); await A.mouse.down();
+  await A.mouse.move(cb.x + 60, cb.y + 50, { steps: 4 }); await A.mouse.move(tb.x + tb.width / 2, tb.y + 30, { steps: 12 }); await A.mouse.up();
+  await A.waitForFunction(() => tasks.find((t) => t.title === 'T3')?.status === 'review');
+  ok(true, 'kanban drag to In review');
+  await A.click('[data-board-mode=list]');
+
+  // Patch notes
+  await go(A, 'updates', '[data-action=new-update]');
+  await A.click('[data-action=new-update]'); await A.fill('#upd-title', 'UPDATE 1'); await A.fill('#upd-new', 'Dice\nQuests');
+  await A.click('button[name=intent][value=publish]');
+  await A.waitForSelector('.patch');
+  await B.waitForSelector('#bell.has-dot');
+  ok(true, 'published update notifies the team');
+
+  // Asset folders
+  await go(A, 'assets', '[data-action=new-folder]');
+  await A.click('[data-action=new-folder]'); await confirmAsk(A, 'Icons');
+  await A.waitForSelector('.folder-tile');
+  await A.locator('.asset-card', { hasText: 'hero.png' }).dragTo(A.locator('.folder-tile'));
+  await A.waitForSelector('.folder-tile:has-text("1 file")');
+  ok(true, 'asset dragged into a folder');
+
+  // Roles: viewer gating in the interface
+  await go(A, 'team', '.people');
+  await A.click('#cs-role-u_bob'); await pick(A, 'Viewer');
+  await B.waitForSelector('#invites:has-text("Viewer")');
+  await go(B, 'tasks');
+  ok(await B.locator('[data-action=new-task]').count() === 0, 'Viewer sees no New task button');
+  await A.click('#cs-role-u_bob'); await pick(A, 'Member');
+  await B.waitForFunction(() => roleOf(user.uid) === 'member');
+
   const stored = await A.evaluate(() => localStorage.getItem('mock:db'));
   ok(!/"name":"(Alice|Bob)"/.test(stored), 'account names are not copied into the database');
 
@@ -142,14 +202,14 @@ const blobs = new Map();
   await V.waitForSelector('#invites .invite');
   ok((await V.textContent('#invites')).includes('You can view this workspace'), 'view-only banner');
   await go(V, 'overview', 'text=T1');
-  await V.click('[data-action=new-task] >> nth=0'); await V.fill('#task-title', 'Sneaky'); await V.click('#task-form button[type=submit]');
-  await V.waitForSelector('.toast.error');
-  ok((await V.textContent('.toast')).includes('share it with you as Editor'), 'view-only write refused with a clear message');
+  ok(await V.locator('[data-action=new-task]').count() === 0, 'view-only access has no New task button');
+  const forced = await V.evaluate(async () => { try { await sub('tasks').add({ title: 'Sneaky', type: 'task', status: 'todo', priority: 'low' }); return 'allowed'; } catch (e) { return e.code; } });
+  ok(forced === 'invalid_argument', 'a forced write from a view-only account is refused (' + forced + ')');
   ok(!(await A.evaluate(() => localStorage.getItem('mock:db'))).includes('Sneaky'), 'refused write left no data');
 
   // Mobile
   await A.setViewportSize({ width: 390, height: 844 });
-  for (const v of ['overview', 'chat', 'team', 'assets', 'activity']) {
+  for (const v of ['overview', 'chat', 'team', 'assets', 'activity', 'updates', 'tasks']) {
     await go(A, v); await A.waitForTimeout(300);
     const w = await A.evaluate(() => document.documentElement.scrollWidth);
     ok(w <= 390, `mobile ${v} no horizontal scroll (${w})`);

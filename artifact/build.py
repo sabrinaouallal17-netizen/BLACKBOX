@@ -13,7 +13,7 @@ out = Path(sys.argv[1])
 html = (root / "index.html").read_text()
 css = (root / "styles.css").read_text()
 backend = (root / "artifact" / "backend.js").read_text()
-scripts = {name: (root / name).read_text() for name in ("icons.js", "ui.js", "app.js")}
+scripts = {name: (root / name).read_text() for name in ("icons.js", "ui.js", "changelog.js", "app.js", "notify.js", "board.js", "updates.js", "boot.js")}
 
 
 def inline_script(code):
@@ -27,7 +27,8 @@ html = firebase_scripts.sub("", html)
 html = html.replace('<script src="firebase-config.js"></script>', inline_script(backend))
 for name, code in scripts.items():
     html = html.replace(f'<script src="{name}"></script>', inline_script(code))
-assert not re.search(r"<script[^>]+src=", html), "a script was not inlined"
+# Only CDN libraries the Artifact page allows may stay external.
+assert not re.search(r'<script[^>]+src="(?!https://cdn\.jsdelivr\.net/npm/)', html), "a script was not inlined"
 
 # The Artifact publisher adds its own document skeleton.
 html = re.sub(r"<!doctype html>\s*|</?html[^>]*>\s*|</?head>\s*|</?body>\s*", "", html, flags=re.I)

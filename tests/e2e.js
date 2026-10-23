@@ -14,6 +14,7 @@ const GIF = Buffer.from('R0lGODlhAgACAIABAP8A/////yH/C05FVFNDQVBFMi4wAwEAAAAh+QQ
 
 async function newUser(browser, label) {
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
+  await ctx.route(/cdn\.jsdelivr\.net\/npm\/idiomorph@[\d.]+\/dist\/idiomorph\.min\.js/, (route) => route.fulfill({ body: fs.readFileSync(`${SDK}/../idiomorph/dist/idiomorph.min.js`), contentType: 'application/javascript' }));
   await ctx.route(/gstatic\.com\/firebasejs\/[\d.]+\/(.+)$/, (route) => {
     const f = route.request().url().match(/firebasejs\/[\d.]+\/(.+)$/)[1];
     route.fulfill({ body: fs.readFileSync(`${SDK}/${f}`), contentType: 'application/javascript' });
@@ -204,8 +205,9 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
   await A.fill('#chat-text', 'Two screenshots');
   await A.click('.send-btn');
   await A.waitForFunction(() => document.querySelectorAll('.atts.multi .att-img').length === 2);
-  await A.waitForSelector('.pend', { state: 'detached' });
-  ok(await A.isEnabled('.send-btn'), 'multiple images sent in one message');
+  await A.waitForSelector('.msg.outgoing', { state: 'detached' });
+  await A.waitForFunction(() => document.querySelectorAll('.atts.multi button.att-img').length === 2);
+  ok(await A.locator('.pend').count() === 0, 'multiple images sent in one message');
   // Real drag and drop onto the chat
   const dropped = await png(A, '#e11d48', 300, 300, 'DROP');
   await A.evaluate((b64) => {
@@ -217,8 +219,8 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
   }, dropped.toString('base64'));
   await A.waitForSelector('.pend');
   await A.click('.send-btn');
-  await A.waitForSelector('.pend', { state: 'detached' });
-  await A.waitForFunction(() => document.querySelectorAll('.att-img').length === 3);
+  await A.waitForSelector('.msg.outgoing', { state: 'detached' });
+  await A.waitForFunction(() => document.querySelectorAll('button.att-img').length === 3);
   ok(true, 'drag and drop a file into the chat');
   await A.click('[data-action=toggle-gifs]');
   await A.waitForSelector('.gif-pick');
@@ -308,8 +310,8 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
     await projectsCol().doc(currentId).collection('messages').add({ uid: user.uid, name: 'Bob', text: 'see file', at: Date.now(), attachments: [
       { url: "javascript:window.__pwned=1", type: 'text/plain', name: 'evil.pdf', size: 1 },
       { url: "javascript:window.__pwned=2", type: 'image/png', name: 'evil.png', size: 1 }] });
-    await projectsCol().doc(currentId).update({ thumbnail: "x');position:fixed;inset:0;background:url('https://evil.test/a.png" });
   });
+  await A.evaluate(() => projectsCol().doc(currentId).update({ thumbnail: "x');position:fixed;inset:0;background:url('https://evil.test/a.png" }));
   await go(A, 'chat', '#chat-text'); await A.waitForSelector('text=evil.pdf');
   ok(await A.evaluate(() => !document.querySelector('[href^="javascript"], [src^="javascript"], [data-lightbox^="javascript"]')), 'javascript: URLs are never rendered');
   await A.click('.att-file'); await A.waitForTimeout(300);
@@ -317,6 +319,151 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
   await go(A, 'overview');
   ok(await A.locator('.banner').count() === 0 || !(await A.getAttribute('.banner', 'style')).includes('position'), 'hostile thumbnail value is not injected into CSS');
   await A.evaluate(async () => projectsCol().doc(currentId).update({ thumbnail: '' }));
+
+  // ---------- v1.5 ----------
+  // Smooth updates: a live change patches the page, existing images stay the same elements
+  await go(A, 'chat', '#chat-text');
+  await A.waitForSelector('button.att-img img');
+  const imgHandle = await A.$('button.att-img img');
+  await go(B, 'chat', '#chat-text');
+  await B.fill('#chat-text', 'patch check'); await B.press('#chat-text', 'Enter');
+  await A.waitForSelector('text=patch check');
+  ok(await imgHandle.evaluate((el) => el.isConnected), 'a live update keeps existing images in place (no re-render flicker)');
+
+  // Download button on chat images
+  await A.locator('.att-wrap').first().hover();
+  const [dl] = await Promise.all([A.waitForEvent('download'), A.locator('.att-wrap').first().locator('.att-dl').click()]);
+  ok(/\.(png|jpe?g|webp|gif)$/.test(dl.suggestedFilename()), 'image download button (' + dl.suggestedFilename() + ')');
+
+  // Channels and unread dots
+  await A.click('[data-action=new-channel]'); await confirmAsk(A, 'Art Team', 'Concept art and icons');
+  await A.waitForSelector('.chan-head:has-text("art-team")');
+  ok((await A.textContent('.chan-topic')) === 'Concept art and icons', 'channel created with topic');
+  await go(B, 'chat.general', '#chat-text');
+  await A.fill('#chat-text', 'First art drop'); await A.press('#chat-text', 'Enter');
+  await B.waitForSelector('.chan-list a.unread[href="#chat.art-team"]');
+  ok(await B.locator('#side-nav a[data-view="chat"].has-dot').count() === 1, 'unread dot on the channel and on Chat');
+  await B.click('.chan-list a[href="#chat.art-team"]');
+  await B.waitForSelector('.msg-text:has-text("First art drop")');
+  ok(await B.locator('.chan-list a.unread').count() === 0, 'opening the channel clears the dot');
+  ok(!(await B.textContent('#chat-log')).includes('patch check'), 'channels keep their own messages');
+
+  // Mentions and notifications
+  await B.fill('#chat-text', 'great job @Ali');
+  await B.waitForSelector('#mention-picker:not([hidden])');
+  await B.press('#chat-text', 'Enter'); // picks the highlighted person
+  ok((await B.inputValue('#chat-text')).startsWith('great job @Alice M '), 'mention picker completes the name');
+  await B.type('#chat-text', 'love it'); await B.press('#chat-text', 'Enter');
+  await A.waitForSelector('.msg.mentioned .mention.me');
+  ok(true, 'mention shown and highlighted for the person mentioned');
+  await A.waitForSelector('#bell.has-dot');
+  await A.click('#bell');
+  await A.waitForSelector('.np-item.unread');
+  ok((await A.textContent('.np-item.unread')).includes('mentioned you'), 'notification for the mention');
+  await go(A, 'overview');
+  await A.click('#bell'); await A.click('.np-item.unread');
+  await A.waitForSelector('.chan-head:has-text("art-team")');
+  ok(!(await A.isVisible('#bell.has-dot')), 'opening the notification goes to the message and marks it read');
+
+  // Assigning a task notifies the assignee
+  await go(A, 'tasks');
+  await menu(A, 'T3 quests', 'Edit');
+  await A.click('#cs-task-owner'); await pick(A, 'Bob');
+  await A.click('#task-form button[type=submit]');
+  await B.waitForSelector('#bell.has-dot');
+  await B.click('#bell');
+  ok((await B.textContent('.notif-panel')).includes('assigned you T3 quests'), 'assignment notification');
+  await B.click('#bell');
+
+  // Kanban: drag a card to another column
+  await A.click('[data-board-mode=board]');
+  await A.waitForSelector('.board .kcard:has-text("T3 quests")');
+  const card = A.locator('.kcard', { hasText: 'T3 quests' });
+  const cb = await card.boundingBox();
+  const tb = await A.locator('.kcol[data-kcol=progress] .kcol-body').boundingBox();
+  await A.mouse.move(cb.x + 40, cb.y + 30); await A.mouse.down();
+  await A.mouse.move(cb.x + 60, cb.y + 50, { steps: 4 });
+  await A.mouse.move(tb.x + tb.width / 2, tb.y + 30, { steps: 12 });
+  await A.mouse.up();
+  await A.waitForSelector('.kcol[data-kcol=progress] .kcard:has-text("T3 quests")');
+  await A.waitForFunction(() => tasks.find((t) => t.title === 'T3 quests')?.status === 'progress');
+  ok(true, 'drag a card from To do to In progress');
+  await A.reload(); await A.waitForSelector('.board');
+  ok(await A.locator('.kcol[data-kcol=progress] .kcard:has-text("T3 quests")').count() === 1, 'board column and mode saved after reload');
+  await A.screenshot({ path: process.env.OUT + '/f-board.png' });
+  await A.click('[data-board-mode=list]');
+
+  // Roles: Viewer can read and chat, not change; rules agree
+  await go(A, 'team', '.people');
+  const bobUid = await B.evaluate(() => user.uid);
+  await A.click(`#cs-role-${bobUid}`); await pick(A, 'Viewer');
+  await B.waitForSelector('#invites:has-text("Viewer")');
+  ok(true, 'Bob sees he is a Viewer');
+  await go(B, 'tasks');
+  ok(await B.locator('[data-action=new-task]').count() === 0, 'Viewer has no New task button');
+  B.expectDenied = true;
+  const vr = await B.evaluate(async () => {
+    const out = {};
+    try { await projectsCol().doc(currentId).collection('tasks').add({ title: 'x', type: 'task', status: 'todo', priority: 'low', order: 99 }); out.task = 'allowed'; } catch (e) { out.task = e.code; }
+    try { await projectsCol().doc(currentId).update({ name: 'Hacked' }); out.settings = 'allowed'; } catch (e) { out.settings = e.code; }
+    try { await projectsCol().doc(currentId).collection('messages').add({ uid: user.uid, name: 'Bob', text: 'viewer can chat', at: Date.now() }); out.chat = 'allowed'; } catch (e) { out.chat = e.code; }
+    return out;
+  });
+  ok(vr.task === 'permission-denied' && vr.settings === 'permission-denied' && vr.chat === 'allowed', 'rules: Viewer can chat but not create tasks or change settings ' + JSON.stringify(vr));
+  const mr = await B.evaluate(async () => { try { await projectsCol().doc(currentId).update({ roles: { [user.uid]: 'admin' } }); return 'allowed'; } catch (e) { return e.code; } });
+  ok(mr === 'permission-denied', 'rules: a non-admin cannot promote themselves');
+  B.expectDenied = false;
+  await A.click(`#cs-role-${bobUid}`); await pick(A, 'Member');
+  await B.waitForFunction(() => roleOf(user.uid) === 'member');
+
+  // Patch notes
+  await go(A, 'updates', '.updates-page');
+  await A.click('[data-action=new-update]');
+  await A.waitForSelector('#upd-title');
+  await A.fill('#upd-title', 'UPDATE 1: Dice'); await A.fill('#upd-version', 'v1.0'); await A.fill('#upd-summary', 'The first big update.');
+  await A.click('[data-action=fill-update]');
+  ok((await A.inputValue('#upd-new')).split('\n').includes('T1 dice'), 'fill from completed work');
+  await A.fill('#upd-balance', 'Rare odds **2x** higher');
+  await A.click('button[name=intent][value=publish]');
+  await A.waitForSelector('.patch');
+  ok((await A.textContent('.patch-sections')).includes('T1 dice') && await A.locator('.patch-sec strong').count() === 1, 'published patch notes with sections and formatting');
+  await B.waitForSelector('#bell.has-dot');
+  await B.click('#bell');
+  ok((await B.textContent('.notif-panel')).includes('published UPDATE 1: Dice'), 'team notified of the update');
+  await B.click('.np-item.unread');
+  await B.waitForSelector('.patch');
+  ok((await B.textContent('#view h1')) === 'UPDATE 1: Dice', 'the notification opens the patch notes');
+  ok(await B.locator('[data-action=edit-update]').count() === 0, 'members read patch notes, only admins edit');
+
+  // Asset folders
+  await go(A, 'assets', '.assets-page');
+  await A.click('[data-action=new-folder]'); await confirmAsk(A, 'Characters art');
+  await A.waitForSelector('.folder-tile:has-text("Characters art")');
+  await A.click('.folder-tile:has-text("Characters art")');
+  await A.waitForSelector('.asset-crumbs:has-text("Characters art")');
+  await choose(A, '.dropzone[data-pick=asset]', [file('c1.png', await png(A, '#be185d', 400, 400, 'C1')), file('c2.png', await png(A, '#0891b2', 400, 400, 'C2'))]);
+  await A.waitForFunction(() => document.querySelectorAll('.asset-card').length === 2);
+  ok(true, 'parallel upload into a folder');
+  await A.click('.asset-crumbs a');
+  await A.waitForSelector('.folder-tile:has-text("2 files")');
+  await A.locator('.asset-card', { hasText: 'hero.png' }).hover();
+  await A.locator('.asset-card', { hasText: 'hero.png' }).locator('[data-asset-menu]').click();
+  await pick(A, 'Move to…'); await pick(A, 'Characters art');
+  await A.waitForSelector('.folder-tile:has-text("3 files")');
+  ok(true, 'move an asset into a folder from its menu');
+  await A.locator('.asset-card', { hasText: 'dance.gif' }).dragTo(A.locator('.folder-tile:has-text("Characters art")'));
+  await A.waitForSelector('.folder-tile:has-text("4 files")');
+  ok(true, 'drag an asset onto a folder');
+  await A.screenshot({ path: process.env.OUT + '/f-folders.png' });
+  await A.locator('.folder-tile').hover(); await A.click('[data-folder-menu]'); await pick(A, 'Delete folder'); await confirmAsk(A);
+  await A.waitForSelector('.folder-tile', { state: 'detached' });
+  ok(await A.locator('.asset-card').count() === 4, 'deleting a folder keeps its files');
+
+  // What's new
+  await A.click('#whats-new-btn');
+  await A.waitForSelector('#whats-new-dialog[open]');
+  ok((await A.textContent('#whats-new-list')).includes('v1.5'), "What's new lists this update");
+  await A.click('#whats-new-dialog button.primary');
 
   // Activity
   await go(A, 'activity', '.act-list');
@@ -334,7 +481,7 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
 
   // Mobile
   await A.setViewportSize({ width: 390, height: 844 });
-  for (const v of ['overview', 'chat', 'assets', 'activity', 'project', 'profile']) {
+  for (const v of ['overview', 'chat', 'assets', 'updates', 'tasks', 'activity', 'project', 'profile']) {
     await go(A, v); await A.waitForTimeout(300);
     const w = await A.evaluate(() => document.documentElement.scrollWidth);
     ok(w <= 390, `mobile ${v} no horizontal scroll (${w})`);

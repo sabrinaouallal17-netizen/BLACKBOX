@@ -45,6 +45,15 @@ function formatSize(bytes) {
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
+// Runs fn over items with at most `limit` at a time (uploads in parallel without flooding).
+async function mapLimit(items, limit, fn) {
+  const queue = items.slice();
+  const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    while (queue.length) await fn(queue.shift());
+  });
+  await Promise.all(workers);
+}
+
 function storeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function storeSet(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } }
 
@@ -162,10 +171,16 @@ document.addEventListener("scroll", (e) => { if (!popover.el?.contains(e.target)
 
 /* ---------- Styled selects ---------- */
 // Keeps the native <select> (forms, values, change events) and draws a matching button + popover.
+// A patched page can keep the same <select> but drop its button and markers, so this runs on every
+// render and only binds each select's change listener once.
+const csBound = new WeakSet();
 function upgradeSelects(root = document) {
-  for (const sel of $$("select:not([data-cs])", root)) {
-    sel.dataset.cs = "1";
+  // Buttons whose select is gone (or no longer next to them) are left over from a patch.
+  for (const btn of $$(".cselect", root)) if (btn.previousElementSibling?.tagName !== "SELECT") btn.remove();
+  for (const sel of $$("select", root)) {
     sel.classList.add("cs-native");
+    if (sel.nextElementSibling?.classList.contains("cselect")) { refreshSelect(sel); continue; }
+    sel.dataset.cs = "1";
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = `cselect ${sel.dataset.csClass || ""}`;
@@ -182,7 +197,7 @@ function upgradeSelects(root = document) {
         sel.dispatchEvent(new Event("change", { bubbles: true }));
       });
     });
-    sel.addEventListener("change", () => refreshSelect(sel));
+    if (!csBound.has(sel)) { csBound.add(sel); sel.addEventListener("change", () => refreshSelect(sel)); }
     refreshSelect(sel);
   }
 }
@@ -194,11 +209,17 @@ function refreshSelect(sel) {
 }
 const refreshSelects = (root = document) => $$("select[data-cs]", root).forEach(refreshSelect);
 
+/* ---------- Images fade in when loaded ---------- */
+const markLoaded = (e) => { if (e.target.tagName === "IMG") e.target.classList.add("loaded"); };
+document.addEventListener("load", markLoaded, true);
+document.addEventListener("error", markLoaded, true);
+
 /* ---------- Lightbox ---------- */
 function openLightbox(url, caption = "") {
   if (!safeUrl(url)) return;
   const lb = $("#lightbox");
-  lb.innerHTML = `<figure><img src="${src(url)}" alt="${esc(caption)}">${caption ? `<figcaption>${esc(caption)}</figcaption>` : ""}</figure><button class="icon-btn round lb-close" title="Close">${icon("x", 20)}</button>`;
+  lb.innerHTML = `<figure><img src="${src(url)}" alt="${esc(caption)}">${caption ? `<figcaption>${esc(caption)}</figcaption>` : ""}</figure>
+    <div class="lb-actions"><button class="icon-btn round" data-download="${src(url)}" data-name="${esc(caption || "image")}" title="Download">${icon("download", 19)}</button><button class="icon-btn round lb-close" title="Close">${icon("x", 20)}</button></div>`;
   lb.hidden = false;
   lb.querySelector(".lb-close").focus();
 }
@@ -210,12 +231,14 @@ document.addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#lightbox").hidden) $("#lightbox").hidden = true; });
 
 /* ---------- Chat formatting (Discord-style markdown, safe) ---------- */
-function formatMessage(text) {
+// `mention(id)` renders a <@id> token (a teammate mention) as HTML.
+function formatMessage(text, { mention } = {}) {
   const blocks = [];
   const keep = (html) => `\u0000${blocks.push(html) - 1}\u0000`;
   // Pull code and links out first so nothing inside them gets formatted.
   let s = String(text || "").replace(/\u0000/g, "").replace(/```(?:[a-z0-9]*\n)?([\s\S]*?)```/gi, (_, code) => `\u0000${blocks.push(`<pre><code>${esc(code.replace(/\n$/, ""))}</code></pre>`) - 1}\u0000`);
   s = s.replace(/`([^`\n]+)`/g, (_, code) => keep(`<code>${esc(code)}</code>`));
+  s = s.replace(/<@([A-Za-z0-9_-]+)>/g, (_, id) => keep(mention ? mention(id) : "@someone"));
   s = s.replace(/https?:\/\/[^\s<>"'`\u0000]+[^\s<>"'`\u0000.,:;)\]]/g, (url) => keep(`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`));
   s = esc(s);
   s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")

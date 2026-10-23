@@ -56,7 +56,10 @@
     <aside class="sidebar" id="sidebar">
       <div class="brand">
         <span class="logo">BLACKBOX</span>
-        <button class="icon-btn" data-action="new-project" title="New project" data-icon="plus"></button>
+        <div class="row-gap">
+          <button class="icon-btn bell" id="bell" data-action="toggle-notifs" title="Notifications" aria-haspopup="dialog" aria-expanded="false" data-icon="bell"></button>
+          <button class="icon-btn" data-action="new-project" title="New project" data-icon="plus"></button>
+        </div>
       </div>
 
       <div class="side-section" id="project-picker">
@@ -70,6 +73,7 @@
         <a href="#bugs" data-view="bugs"><span data-icon="bug"></span>Bugs</a>
         <a href="#chat" data-view="chat"><span data-icon="chat"></span>Chat</a>
         <a href="#assets" data-view="assets"><span data-icon="images"></span>Assets</a>
+        <a href="#updates" data-view="updates"><span data-icon="rocket"></span>Updates</a>
         <a href="#activity" data-view="activity"><span data-icon="pulse"></span>Activity</a>
         <a href="#project" data-view="project"><span data-icon="sliders"></span>Project settings</a>
       </nav>
@@ -84,6 +88,7 @@
         <div class="avatar-stack" id="side-team"></div>
       </div>
 
+      <button class="whats-new" id="whats-new-btn" data-action="whats-new"></button>
       <div class="save-status" id="save-status" role="status"></div>
       <div class="side-user" id="side-user"></div>
     </aside>
@@ -97,12 +102,15 @@
 
   <div class="menu" id="popover" role="menu" hidden></div>
   <div class="lightbox" id="lightbox" hidden></div>
+  <div class="notif-panel" id="notif-panel" role="dialog" aria-label="Notifications" hidden></div>
+  <div class="mention-picker" id="mention-picker" role="listbox" hidden></div>
   <input type="file" id="file-picker" hidden>
   <div class="toast" id="toast" role="status" hidden></div>
 
   <dialog id="task-dialog">
     <form method="dialog" id="task-form">
       <h2 id="task-dialog-title">New task</h2>
+      <fieldset class="plain">
       <label>Title<input id="task-title" name="title" required maxlength="80"></label>
       <label>Description<input id="task-desc" name="desc" maxlength="140"></label>
       <div class="form-grid">
@@ -123,6 +131,7 @@
         </label>
         <label>Owner<select name="owner" id="task-owner"></select></label>
       </div>
+      </fieldset>
       <div class="dialog-actions">
         <span class="spacer"></span>
         <button type="button" class="btn ghost" id="cancel-task-btn">Cancel</button>
@@ -152,6 +161,14 @@
     </form>
   </dialog>
 
+  <dialog id="whats-new-dialog" class="wide-dialog">
+    <form method="dialog">
+      <h2>What's new in BLACKBOX</h2>
+      <div id="whats-new-list" class="whats-new-list"></div>
+      <div class="dialog-actions"><span class="spacer"></span><button class="btn primary">Close</button></div>
+    </form>
+  </dialog>
+
   <dialog id="ask-dialog">
     <form id="ask-form">
       <h2 id="ask-title"></h2>
@@ -168,9 +185,15 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/idiomorph@0.7.3/dist/idiomorph.min.js"></script>
   <script src="firebase-config.js"></script>
   <script src="icons.js"></script>
   <script src="ui.js"></script>
+  <script src="changelog.js"></script>
   <script src="app.js"></script>
+  <script src="notify.js"></script>
+  <script src="board.js"></script>
+  <script src="updates.js"></script>
+  <script src="boot.js"></script>
 </body>
 </html>
