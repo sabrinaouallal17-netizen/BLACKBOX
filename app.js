@@ -316,7 +316,12 @@ function watchProjects() {
       watchNotifications();
       if (!projects[currentId]) selectProject(pickDefaultProject());
       else if (subscribedId !== currentId) selectProject(currentId);
-      else { watchChannels(); scheduleRender(); }
+      else {
+        watchChannels();
+        if (!channelsOf().some((c) => c.id === channelId)) listenChannel("general");
+        if (updatesFor !== can("manage")) listenUpdates();
+        scheduleRender();
+      }
     }, (e) => { console.error("BLACKBOX: projects listener", e); toast(friendlyError(e), true); }),
   ];
   watchProfiles([m.uid]);
@@ -435,7 +440,21 @@ function watchChannels() {
   }
 }
 
+// Admins load every update (drafts too); others only published ones, which is all the rules let them read.
+let unsubUpdates = null;
+let updatesFor = null;
+function listenUpdates() {
+  unsubUpdates?.();
+  updatesFor = can("manage");
+  const q = updatesFor ? sub("updates") : sub("updates").where("status", "==", "published");
+  unsubUpdates = listen(() => q, (snap) => {
+    updates = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (b.publishedAt || b.createdAt || 0) - (a.publishedAt || a.createdAt || 0));
+    scheduleRender();
+  });
+}
+
 function selectProject(id) {
+  unsubUpdates?.(); unsubUpdates = null;
   unsubCurrent.forEach((u) => u());
   unsubActivity?.();
   unsubMessages?.();
@@ -445,7 +464,7 @@ function selectProject(id) {
   unsubActivity = null;
   unsubMessages = null;
   channelLatest = {};
-  outbox = outbox.filter((o) => o.pid !== id && o.state === "sending");
+  outbox = outbox.filter((o) => projects[o.pid]); // unsent messages of other projects wait for their return
   editingUpdate = null; updateCoverDraft = null; assetFolder = "";
   tasks = []; activity = []; messages = []; items = []; assets = []; updates = [];
   taskFilter = { status: "all", owner: "all" };
@@ -464,10 +483,6 @@ function selectProject(id) {
       tasks = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       scheduleRender();
     }),
-    listen(() => sub("updates"), (snap) => {
-      updates = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (b.publishedAt || b.createdAt || 0) - (a.publishedAt || a.createdAt || 0));
-      scheduleRender();
-    }),
     listen(() => sub("items"), (snap) => {
       items = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
       scheduleRender();
@@ -479,6 +494,7 @@ function selectProject(id) {
     }),
   ];
   listenActivity();
+  listenUpdates();
   listenChannel(route().name === "chat" && channelsOf().some((c) => c.id === route().arg) ? route().arg : "general");
   watchChannels();
   render();
@@ -489,13 +505,13 @@ function selectProject(id) {
 let migrating = false;
 async function migrateLegacyItems() {
   const p = project();
-  if (migrating || !p || BB_READONLY() || !(p.collections || []).some((c) => Array.isArray(c.items) && c.items.length)) return;
+  if (migrating || !p || !can("edit") || !(p.collections || []).some((c) => Array.isArray(c.items) && c.items.length)) return;
   migrating = true;
   await act(async () => {
     let t = Date.now();
     // Fixed ids: if two people migrate at once, or a retry repeats it, each item is written once.
     for (const c of p.collections) for (const [i, name] of (c.items || []).entries()) {
-      await sub("items").doc(`legacy-${c.id}-${i}`).set({ collectionId: c.id, name: String(name).slice(0, 60), desc: "", image: "", createdBy: p.ownerId, createdAt: t++ });
+      await sub("items").doc(`legacy-${c.id}-${i}`).set({ collectionId: c.id, name: String(name).slice(0, 60), desc: "", image: "", createdBy: user.uid, createdAt: t++ });
     }
     // Strip the old lists from the collections as they are now, keeping edits made meanwhile.
     await updateProject({ collections: (project()?.collections || []).map(({ items: _old, ...c }) => c) });
@@ -671,8 +687,8 @@ function releaseCard(full = false) {
       <div class="release-top"><span class="release-name">${esc(r.name)}</span>${r.due ? `<span class="due">${icon("calendar", 18)}Due ${esc(r.due)}</span>` : ""}</div>
       <div class="progress"><div style="width:${pct}%"></div></div>
       <div class="progress-row"><span>${done} of ${r.items.length} items complete</span><span>${pct}%</span></div>
-      ${r.items.length ? `<ul class="checklist">${r.items.map((it, i) => `<li><label><input type="checkbox" data-release-item="${i}" ${it.done ? "checked" : ""}><span>${esc(it.label)}</span></label>${full ? `<button class="icon-btn bare" data-remove-release="${i}" title="Remove">${icon("x", 16)}</button>` : ""}</li>`).join("")}</ul>` : '<p class="muted">No items yet.</p>'}
-      ${full ? '<form class="add-item" data-form="release-item" data-drafts><input class="input" id="release-new" name="label" placeholder="Add a release item…" required maxlength="80"><button class="btn">Add</button></form>' : `<a class="link" href="#release">View release details ${icon("arrow", 16)}</a>`}
+      ${r.items.length ? `<ul class="checklist">${r.items.map((it, i) => `<li><label><input type="checkbox" data-release-item="${i}" ${it.done ? "checked" : ""} ${can("edit") ? "" : "disabled"}><span>${esc(it.label)}</span></label>${full && can("edit") ? `<button class="icon-btn bare" data-remove-release="${i}" title="Remove">${icon("x", 16)}</button>` : ""}</li>`).join("")}</ul>` : '<p class="muted">No items yet.</p>'}
+      ${full && !can("edit") ? "" : full ? '<form class="add-item" data-form="release-item" data-drafts><input class="input" id="release-new" name="label" placeholder="Add a release item…" required maxlength="80"><button class="btn">Add</button></form>' : `<a class="link" href="#release">View release details ${icon("arrow", 16)}</a>`}
     </div></section>`;
 }
 
@@ -1209,7 +1225,7 @@ function render() {
   renderSidebar();
   renderNotifPanel();
   renderWhatsNew();
-  if (r.name === "chat" && project()) markChannelRead();
+  if (r.name === "chat" && project() && document.visibilityState === "visible") markChannelRead();
   document.title = project() ? `${project().name} · BLACKBOX` : "BLACKBOX";
   autoGrow($("#chat-text"));
 
@@ -1346,7 +1362,11 @@ function openItem(collectionId, id = null, file = null) {
   const x = id ? items.find((i) => i.id === id) : null;
   if (itemEdit.preview) URL.revokeObjectURL(itemEdit.preview);
   itemEdit = { id, collectionId: x?.collectionId || collectionId, file, image: x?.image || "", preview: file ? URL.createObjectURL(file) : "" };
-  $("#item-dialog-title").textContent = x ? "Edit item" : "New item";
+  const ro = !can("edit");
+  $("#item-dialog-title").textContent = ro ? "Item" : x ? "Edit item" : "New item";
+  itemForm.querySelector("fieldset").disabled = ro;
+  $("#item-save").hidden = ro;
+  $("#item-cancel").textContent = ro ? "Close" : "Cancel";
   $("#item-name").value = x?.name || (file ? file.name.replace(/\.[^.]+$/, "") : "");
   $("#item-desc").value = x?.desc || "";
   renderItemPreview();
@@ -1569,6 +1589,8 @@ function sendChat() {
   processOutbox(entry);
 }
 async function processOutbox(entry) {
+  if (entry.busy) return; // a double-clicked Retry must not post twice
+  entry.busy = true;
   entry.state = "sending";
   entry.hidden = false;
   scheduleRender();
@@ -1586,6 +1608,7 @@ async function processOutbox(entry) {
       entry.posted = i + 1;
     }
   });
+  entry.busy = false;
   if (!ok) {
     entry.state = "failed";
     entry.hidden = false;
@@ -1595,9 +1618,7 @@ async function processOutbox(entry) {
   }
   outbox = outbox.filter((o) => o !== entry);
   entry.files.forEach((f) => f.preview && URL.revokeObjectURL(f.preview));
-  if (entry.pid === currentId) {
-    for (const id of mentionedIds(entry.text)) notify(id, "mention", detokenizeMentions(entry.text).slice(0, 120), `#chat.${entry.channel}`);
-  }
+  for (const id of mentionedIds(entry.text)) notify(id, "mention", detokenizeMentions(entry.text).slice(0, 120), `#chat.${entry.channel}`, entry.pid);
   scheduleRender();
 }
 async function sendGif(asset) {
@@ -1611,7 +1632,7 @@ async function saveMessageEdit(id, text) {
   const m = messages.find((x) => x.id === id);
   editingMsg = null;
   delete drafts["msg-edit-text"];
-  const next = tokenizeMentions(text.trim());
+  const next = tokenizeMentions(text.trim(), mentionedIds(m?.text));
   if (!m || next === (m.text || "")) return render();
   if (!next && !m.attachments?.length) return render();
   await act(() => msgCol().doc(id).update({ text: next, editedAt: Date.now() }));
@@ -1752,12 +1773,15 @@ async function editChannel(id) {
   const name = res[0].toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9_-]/g, "").slice(0, 30) || "channel";
   const list = channelsOf();
   if (c) {
-    if (await act(() => updateProject({ channels: list.map((x) => (x.id === c.id ? { ...x, name, topic: res[1] } : x)) }))) log("channel.update", "updated channel", `#${name}`, "Chat");
+    const next = list.map((x) => (x.id === c.id ? { ...x, name, topic: res[1] } : x));
+    if (await act(() => updateProject({ channels: next, channelIds: next.map((x) => x.id) }))) log("channel.update", "updated channel", `#${name}`, "Chat");
     return;
   }
   let cid = slug(name);
   while (list.some((x) => x.id === cid)) cid += "-2";
-  if (await act(() => updateProject({ channels: [...list, { id: cid, name, topic: res[1] || "" }] }), `#${name} created`)) {
+  const next = [...list, { id: cid, name, topic: res[1] || "" }];
+  // channelIds lets the security rules check that a channel exists.
+  if (await act(() => updateProject({ channels: next, channelIds: next.map((x) => x.id) }), `#${name} created`)) {
     log("channel.create", "created channel", `#${name}`, "Chat");
     location.hash = `#chat.${cid}`;
   }
@@ -1773,9 +1797,11 @@ function openChannelMenu(btn) {
     if (it.id === "delete") {
       if (!(await ask({ title: `Delete #${c.name}?`, text: "All its messages are deleted for everyone.", ok: "Delete channel", danger: true }))) return;
       const ok = await act(async () => {
+        // Close the channel first so nothing new lands in it, then clear its messages.
+        const next = channelsOf().filter((x) => x.id !== c.id);
+        await updateProject({ channels: next, channelIds: next.map((x) => x.id) });
         const snap = await msgCol(c.id).get();
         await mapLimit(snap.docs, 4, (d) => d.ref.delete());
-        await updateProject({ channels: channelsOf().filter((x) => x.id !== c.id) });
       }, "Channel deleted");
       if (ok) { log("channel.delete", "deleted channel", `#${c.name}`, "Chat"); location.hash = "#chat.general"; }
     }
@@ -1974,6 +2000,7 @@ document.addEventListener("click", async (e) => {
     if (await act(() => updateProject({
       memberIds: FV().arrayRemove(d.removeMember),
       [`members.${d.removeMember}`]: FV().delete(),
+      [`roles.${d.removeMember}`]: FV().delete(),
     }), `${name} removed`)) log("member.remove", "removed", name, "Team");
     return;
   }
@@ -2014,6 +2041,7 @@ document.addEventListener("change", async (e) => {
   const t = e.target;
   if (!user) return;
   if (t.dataset.releaseItem !== undefined) {
+    if (!can("edit")) { t.checked = !t.checked; return; }
     const i = +t.dataset.releaseItem;
     const checked = t.checked;
     const label = project().release.items[i]?.label;
@@ -2127,7 +2155,7 @@ document.addEventListener("submit", async (e) => {
   if (type === "chat") return sendChat();
   if (type === "update") return saveUpdate(f, e.submitter?.value || "draft");
   if (type === "edit-msg") return saveMessageEdit(f.dataset.msg, $("#msg-edit-text").value);
-  if (type === "release-item") {
+  if (type === "release-item" && can("edit")) {
     const label = val("label");
     if (!label) return;
     f.reset();
@@ -2302,6 +2330,7 @@ function onAuth(u) {
   profileUnsubs.clear();
   stopNotifications();
   closeMentionPicker();
+  unsubUpdates?.(); unsubUpdates = null;
   unsubMessages?.(); unsubMessages = null;
   channelUnsubs.forEach((f) => f()); channelUnsubs.clear();
   outbox = [];

@@ -57,7 +57,7 @@ service cloud.firestore {
       let role = roleOf(resource.data);
       let keys = request.resource.data.diff(resource.data).affectedKeys();
       return role == 'owner'
-        || (role == 'admin' && !(request.resource.data.get('roles', {}).values().hasAny(['owner'])))
+        || (role == 'admin' && request.resource.data.get('roles', {}).values().hasOnly(['admin', 'member', 'viewer']))
         || (role == 'member' && keys.hasOnly(['collections', 'release', 'assetFolders', 'members', 'memberIds']))
         || (role == 'viewer' && keys.hasOnly(['members', 'memberIds']));
     }
@@ -82,24 +82,31 @@ service cloud.firestore {
       allow delete: if isMember(resource.data) && resource.data.ownerId == request.auth.uid;
 
       // Tasks, collection items and assets: members create and edit; members delete their own, admins anything.
+      // The creator field is set to yourself on create and never changes, so "delete your own" holds.
+      function keeps(field) {
+        return request.resource.data.get(field, '') == resource.data.get(field, '');
+      }
       match /tasks/{taskId} {
         allow read: if isMember(project());
-        allow create, update: if canEdit(project());
+        allow create: if canEdit(project()) && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(project()) && keeps('createdBy');
         allow delete: if isAdmin(project()) || (canEdit(project()) && resource.data.get('createdBy', '') == request.auth.uid);
       }
       match /items/{itemId} {
         allow read: if isMember(project());
-        allow create, update: if canEdit(project());
+        allow create: if canEdit(project()) && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(project()) && keeps('createdBy');
         allow delete: if isAdmin(project()) || (canEdit(project()) && resource.data.get('createdBy', '') == request.auth.uid);
       }
       match /assets/{assetId} {
         allow read: if isMember(project());
-        allow create, update: if canEdit(project());
+        allow create: if canEdit(project()) && request.resource.data.uid == request.auth.uid;
+        allow update: if canEdit(project()) && keeps('uid');
         allow delete: if isAdmin(project()) || (canEdit(project()) && resource.data.get('uid', '') == request.auth.uid);
       }
-      // Patch notes: everyone reads, admins write.
+      // Patch notes: published ones are read by everyone; drafts and writing are for admins.
       match /updates/{updateId} {
-        allow read: if isMember(project());
+        allow read: if isAdmin(project()) || (isMember(project()) && resource.data.status == 'published');
         allow write: if isAdmin(project());
       }
       match /activity/{entryId} {
@@ -117,11 +124,13 @@ service cloud.firestore {
         allow delete: if isMember(project())
           && (resource.data.uid == request.auth.uid || isAdmin(project()));
       }
+      // Only channels listed in the project accept messages.
       match /channels/{channelId}/messages/{messageId} {
         allow read: if isMember(project());
-        allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid;
+        allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid
+          && channelId in project().get('channelIds', []);
         allow update: if isMember(project()) && resource.data.uid == request.auth.uid
-          && request.resource.data.uid == resource.data.uid;
+          && request.resource.data.uid == resource.data.uid && channelId in project().get('channelIds', []);
         allow delete: if isMember(project())
           && (resource.data.uid == request.auth.uid || isAdmin(project()));
       }
@@ -131,7 +140,12 @@ service cloud.firestore {
         allow create: if isMember(project())
           && request.resource.data.from == request.auth.uid
           && request.resource.data.to in project().memberIds
-          && request.resource.data.read == false;
+          && request.resource.data.read == false
+          && request.resource.data.type in ['mention', 'assign', 'update', 'role']
+          && (request.resource.data.type != 'role' || isAdmin(project()))
+          && (request.resource.data.type != 'update' || isAdmin(project()))
+          && request.resource.data.text is string && request.resource.data.text.size() <= 200
+          && request.resource.data.at <= request.time.toMillis() + 60000;
         // The owner also lists them, to remove them when deleting the project.
         allow read: if signedIn() && (resource.data.to == request.auth.uid || project().ownerId == request.auth.uid);
         allow update: if signedIn() && resource.data.to == request.auth.uid && onlyChanged(['read']);

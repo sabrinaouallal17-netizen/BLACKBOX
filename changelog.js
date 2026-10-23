@@ -17,6 +17,7 @@ const CHANGELOG = [
       "Faster uploads (in parallel, large images resized first); messages appear instantly while sending",
       "Smoother pages: updates in place without flicker, soft transitions, images fade in when loaded",
       "This What's new list",
+      "Fixes from a code review: safer permissions and notifications, no lost or doubled messages when switching projects or retrying, read-only release and items for Viewers, more reliable mentions and board ordering",
     ],
   },
   {

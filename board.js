@@ -119,10 +119,20 @@ async function dropTask(id, status, prevId, nextId) {
   const prev = tasks.find((x) => x.id === prevId);
   const next = tasks.find((x) => x.id === nextId);
   let order;
-  if (prev && next) order = (prev.order ?? 0) === (next.order ?? 0) ? (prev.order ?? 0) + 0.5 : ((prev.order ?? 0) + (next.order ?? 0)) / 2;
-  else if (prev) order = (prev.order ?? 0) + 1;
-  else if (next) order = (next.order ?? 0) - 1;
-  else order = t.order ?? 0;
+  if (prev && next && (next.order ?? 0) - (prev.order ?? 0) > 1e-6) order = ((prev.order ?? 0) + (next.order ?? 0)) / 2;
+  else if (prev && !next) order = (prev.order ?? 0) + 1;
+  else if (next && !prev) order = (next.order ?? 0) - 1;
+  else if (!prev && !next) order = t.order ?? 0;
+  else {
+    // Neighbours share an order (older tasks): number the column again, putting the card between them.
+    const col = tasks.filter((x) => x.status === status && x.id !== id && x.type === t.type).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const at = col.findIndex((x) => x.id === next.id);
+    col.splice(at, 0, t);
+    const batch = db.batch();
+    col.forEach((x, k) => { if (x.id !== id && (x.order ?? 0) !== k + 1) { batch.update(sub("tasks").doc(x.id), { order: k + 1 }); x.order = k + 1; } });
+    await act(() => batch.commit());
+    order = at + 1;
+  }
   if (status === t.status && order === t.order) return;
   const changes = status !== t.status ? [{ field: "Status", from: STATUS[t.status]?.label || t.status, to: STATUS[status].label }] : [];
   // Show the move right away; the listener confirms it.

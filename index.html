@@ -143,6 +143,7 @@
   <dialog id="item-dialog" class="wide-dialog">
     <form id="item-form" data-drafts>
       <h2 id="item-dialog-title">New item</h2>
+      <fieldset class="plain">
       <div class="item-form-grid">
         <div>
           <label class="image-pick" data-drop="item-image" title="Choose image"><input type="file" id="item-file" accept="image/*" hidden><div id="item-image-preview"></div></label>
@@ -153,6 +154,7 @@
           <label>Description<textarea id="item-desc" rows="5" maxlength="400"></textarea></label>
         </div>
       </div>
+      </fieldset>
       <div class="dialog-actions">
         <span class="spacer"></span>
         <button type="button" class="btn ghost" id="item-cancel">Cancel</button>

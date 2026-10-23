@@ -415,6 +415,21 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
   B.expectDenied = false;
   await A.click(`#cs-role-${bobUid}`); await pick(A, 'Member');
   await B.waitForFunction(() => roleOf(user.uid) === 'member');
+  B.expectDenied = true;
+  const r3 = await B.evaluate(async (aliceUid) => {
+    const out = {};
+    const p = projectsCol().doc(currentId);
+    const t = (await p.collection('tasks').where('createdBy', '==', aliceUid).limit(1).get()).docs[0];
+    try { await t.ref.update({ createdBy: user.uid }); out.stealTask = 'allowed'; } catch (e) { out.stealTask = e.code; }
+    try { await p.collection('tasks').add({ title: 'x', type: 'task', status: 'todo', priority: 'low', order: 1, createdBy: aliceUid }); out.forgeCreator = 'allowed'; } catch (e) { out.forgeCreator = e.code; }
+    try { await p.collection('notifications').add({ to: aliceUid, from: user.uid, fromName: 'Bob', type: 'role', text: 'Admin', link: '#team', at: Date.now(), read: false }); out.fakeRole = 'allowed'; } catch (e) { out.fakeRole = e.code; }
+    try { await p.collection('notifications').add({ to: aliceUid, from: user.uid, fromName: 'Bob', type: 'mention', text: 'pinned', link: '', at: Date.now() + 1e12, read: false }); out.futureNotif = 'allowed'; } catch (e) { out.futureNotif = e.code; }
+    try { await p.collection('channels').doc('made-up').collection('messages').add({ uid: user.uid, name: 'Bob', text: 'hidden', at: Date.now() }); out.fakeChannel = 'allowed'; } catch (e) { out.fakeChannel = e.code; }
+    return out;
+  }, aliceUid);
+  ok(Object.values(r3).every((v) => v === 'permission-denied'), 'rules block stealing tasks, forged notifications and made-up channels ' + JSON.stringify(r3));
+  B.expectDenied = false;
+  await B.waitForFunction(() => roleOf(user.uid) === 'member');
 
   // Patch notes
   await go(A, 'updates', '.updates-page');
@@ -434,6 +449,11 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
   await B.waitForSelector('.patch');
   ok((await B.textContent('#view h1')) === 'UPDATE 1: Dice', 'the notification opens the patch notes');
   ok(await B.locator('[data-action=edit-update]').count() === 0, 'members read patch notes, only admins edit');
+  await A.evaluate(() => projectsCol().doc(currentId).collection('updates').add({ title: 'Secret draft', status: 'draft', sections: {}, createdBy: user.uid, createdAt: Date.now() }));
+  B.expectDenied = true;
+  const draftRead = await B.evaluate(async () => { try { await projectsCol().doc(currentId).collection('updates').get(); return 'allowed'; } catch (e) { return e.code; } });
+  B.expectDenied = false;
+  ok(draftRead === 'permission-denied' && !(await B.evaluate(() => updates.some((u) => u.title === 'Secret draft'))), 'draft patch notes are hidden from members');
 
   // Asset folders
   await go(A, 'assets', '.assets-page');

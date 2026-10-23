@@ -18,7 +18,7 @@ function watchNotifications() {
       notifs[pid] = snap.docs.map((d) => ({ id: d.id, pid, ...d.data() }));
       if (!first) {
         const fresh = notifs[pid].filter((n) => !before.has(n.id) && !n.read);
-        if (fresh.length) toast(notifText(fresh[0]).replace(/<[^>]+>/g, ""));
+        if (fresh.length) toast(notifPlain(fresh[0]));
       }
       first = false;
       scheduleRender();
@@ -43,6 +43,12 @@ async function notify(to, type, text, link, pid = currentId) {
   }
 }
 const NOTIF_ICONS = { mention: ["at", "purple"], assign: ["check", "blue"], update: ["rocket", "green"], role: ["shield", "orange"] };
+// Same sentence as notifText, as plain text (for the toast).
+function notifPlain(n) {
+  const who = nameOf(n.from, n.fromName);
+  const proj = projects[n.pid]?.name || "a project";
+  return { mention: `${who} mentioned you in ${proj}: “${n.text}”`, assign: `${who} assigned you ${n.text} in ${proj}`, update: `${who} published ${n.text} in ${proj}`, role: `${who} made you ${n.text} in ${proj}` }[n.type] || `${who}: ${n.text}`;
+}
 function notifText(n) {
   const who = `<b>${esc(nameOf(n.from, n.fromName))}</b>`;
   const proj = esc(projects[n.pid]?.name || "a project");
@@ -94,17 +100,23 @@ function mentionables() {
   const p = project();
   return (p?.memberIds || []).map((id) => ({ id, name: memberName(id) })).filter((m) => m.name && m.name !== "Someone");
 }
-function tokenizeMentions(text) {
-  const people = mentionables().sort((a, b) => b.name.length - a.name.length);
-  let out = text;
-  for (const m of people) {
-    const re = new RegExp(`@${m.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w])`, "gi");
-    out = out.replace(re, `<@${m.id}>`);
-  }
-  return out;
+// `prefer` lists ids already mentioned (when editing), so an @Name keeps pointing at the same person.
+function tokenizeMentions(text, prefer = []) {
+  const people = mentionables().sort((a, b) => (prefer.includes(b.id) - prefer.includes(a.id)) || b.name.length - a.name.length);
+  // Code stays as typed: mentions are only read outside `code` and ```blocks```.
+  return String(text).split(/(```[\s\S]*?```|`[^`\n]+`)/g).map((part, i) => {
+    if (i % 2) return part;
+    let out = part;
+    for (const m of people) {
+      const re = new RegExp(`@${m.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_])`, "giu");
+      out = out.replace(re, `<@${m.id}>`);
+    }
+    return out;
+  }).join("");
 }
 const detokenizeMentions = (text) => String(text || "").replace(/<@([A-Za-z0-9_-]+)>/g, (_, id) => `@${memberName(id)}`);
-const mentionedIds = (text) => [...new Set([...String(text || "").matchAll(/<@([A-Za-z0-9_-]+)>/g)].map((m) => m[1]))];
+// Mentions outside code spans (a <@id> typed inside code is shown as text, not a mention).
+const mentionedIds = (text) => [...new Set([...String(text || "").replace(/```[\s\S]*?```|`[^`\n]+`/g, "").matchAll(/<@([A-Za-z0-9_-]+)>/g)].map((m) => m[1]))];
 const renderMention = (id) => `<span class="mention ${id === user?.uid ? "me" : ""}">@${esc(memberName(id))}</span>`;
 
 // Autocomplete: typing @ in the composer lists teammates; arrows/Enter/Tab pick, Escape closes.
