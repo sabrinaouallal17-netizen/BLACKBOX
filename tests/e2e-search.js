@@ -206,7 +206,6 @@ const selectedText = (page) => page.$eval('#sp-list .sp-row.on', (e) => e.textCo
   // Documents: an image asset opens in the lightbox on the Assets page.
   await A.evaluate(() => { assets = [{ id: 'a1', name: 'Logo final.png', kind: 'image', type: 'image/png', url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', size: 70, at: Date.now(), uid: user.uid }]; });
   await A.keyboard.press('Control+k');
-  for (let k = 0; k < 4; k++) { console.log('DBG', await A.evaluate(() => JSON.stringify({ op: getComputedStyle(sp.el).opacity, anims: sp.el.getAnimations().map((a) => [a.animationName, a.playState, a.currentTime]), doc: document.getAnimations().length, vis: document.visibilityState }))); await A.waitForTimeout(300); }
   await type(A, 'doc: logo');
   ok(JSON.stringify(await groups(A)) === '["Documents"]', 'assets are searched as documents');
   await A.keyboard.press('Enter');

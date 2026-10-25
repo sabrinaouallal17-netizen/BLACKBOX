@@ -485,7 +485,8 @@ function spRender() {
       }
       html += "</div>";
     }
-    const quick = spCommandRecords().filter((c) => ["new-task", "new-bug", "chat", "updates", "settings", "whats-new"].includes(c.id));
+    const QUICK = ["new-task", "new-bug", "chat", "updates", "settings", "whats-new"];
+    const quick = spCommandRecords().filter((c) => QUICK.includes(c.id)).sort((a, b) => QUICK.indexOf(a.id) - QUICK.indexOf(b.id));
     if (quick.length) {
       html += `<div class="sp-group"><div class="sp-group-head"><span>Quick actions</span></div>`;
       for (const rec of quick) html += add({ kind: "result", rec }, (i) => spRowHtml(rec, [], i));
@@ -566,7 +567,7 @@ function spBuild() {
   sp.input.addEventListener("input", () => { sp.query = sp.input.value; sp.sel = 0; sp.expanded.clear(); spMaybeLoad(); spRender(); sp.list.scrollTop = 0; });
   sp.el.addEventListener("keydown", spKey);
   sp.el.addEventListener("cancel", (e) => { e.preventDefault(); spClose(); });
-  sp.el.addEventListener("close", () => { if (sp.open) spClose(); });
+  sp.el.addEventListener("close", () => { if (sp.open && !sp.el.open) spClose(); }); // a stale close event never shuts a reopened palette
   sp.el.addEventListener("mousedown", (e) => { sp.downOnBackdrop = e.target === sp.el; });
   sp.el.addEventListener("click", (e) => {
     // A click on the dim backdrop (outside the panel) closes the palette.

@@ -167,6 +167,7 @@ const body = (page) => page.evaluate(() => document.getElementById('doc-body').i
   await A.waitForSelector('#ask-dialog[open]');
   await confirmAsk(A, 'example.com/notes', 'the notes');
   await A.waitForFunction(() => document.querySelector('#doc-body a')?.getAttribute('href') === 'https://example.com/notes');
+  const lt = await A.evaluate(() => document.querySelector('#doc-body a').parentElement.outerHTML); ok(/^<p>Read more:(&nbsp;| )<a /.test(lt), 'link inserted at the caret, new lines are paragraphs');
   ok(true, 'link inserted with Ctrl+K (https added)');
   await A.waitForSelector('#doc-save .doc-save.saving, #doc-save .doc-save.pending, #doc-save .doc-save.saved');
   await saved(A);
@@ -254,6 +255,7 @@ const body = (page) => page.evaluate(() => document.getElementById('doc-body').i
   const prev = await A.textContent('.doc-read');
   ok(await A.locator('.doc-read .doc-sheet').count() === 2 && await A.locator('.doc-jump .chip').count() === 2, 'preview shows every page with a page navigation');
   ok(prev.includes('Double rolls') && !prev.includes('Known issues') && await A.locator('.doc-read [contenteditable]').count() === 0, 'preview is read-only and hides empty sections');
+  await A.waitForTimeout(500);
   await A.screenshot({ path: process.env.OUT + '/u-preview.png', fullPage: true });
   await A.click('.doc-preview-bar [data-action=publish-update]');
   await A.waitForSelector('text=Update published');

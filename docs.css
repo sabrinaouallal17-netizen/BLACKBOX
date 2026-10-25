@@ -16,7 +16,8 @@
 .tl-dot { position: relative; z-index: 1; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--panel), 0 0 0 6px var(--accent-soft); }
 .tl-item.is-draft .tl-dot { background: var(--panel); border: 2px dashed var(--amber); box-shadow: 0 0 0 4px var(--panel); }
 .tl-version { position: relative; z-index: 1; font-family: var(--mono); font-size: 12px; color: var(--soft); background: var(--panel); padding: 2px 6px; border-radius: 6px; max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tl-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 16px; align-items: start; padding: 14px; background: var(--card-2); border: 1px solid var(--border); border-radius: 14px; min-width: 0; transition: border-color 0.15s, transform 0.18s; }
+.tl-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: start; padding: 14px; background: var(--card-2); border: 1px solid var(--border); border-radius: 14px; min-width: 0; transition: border-color 0.15s, transform 0.18s; }
+.tl-card.has-cover { grid-template-columns: auto minmax(0, 1fr) auto; }
 .tl-card:hover { border-color: var(--border-2); }
 .tl-cover { display: block; width: 148px; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; background: var(--panel); }
 .tl-cover img { width: 100%; height: 100%; object-fit: cover; }
@@ -69,7 +70,7 @@
 .doc-save.offline, .doc-save.failed { color: var(--amber); }
 .doc-save .link { font-size: 12.5px; margin-left: 4px; }
 .doc-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 18px; align-items: start; }
-.doc-side { display: grid; gap: 12px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; }
+.doc-side { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; }
 .doc-panel { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 10px; }
 .doc-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 8px 6px; }
 .sheet-tabs { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
@@ -86,7 +87,7 @@
 .sheet-empty { padding: 8px; }
 .doc-details summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; padding: 4px 4px 4px 6px; }
 .doc-details summary::-webkit-details-marker { display: none; }
-.doc-details summary .muted { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-details summary .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .doc-details summary svg { color: var(--muted); transition: transform 0.15s; }
 .doc-details[open] summary svg { transform: rotate(180deg); }
 .doc-meta { display: grid; gap: 12px; padding: 10px 4px 4px; }
@@ -170,7 +171,7 @@
   .doc-prose { font-size: 15.5px; }
   .tl-item { grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
   .tl-version { display: none; }
-  .tl-card { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .tl-card, .tl-card.has-cover { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .tl-cover { width: 100%; }
   .tl-actions { justify-content: flex-start; }
   .timeline { padding: 14px 12px 18px; }

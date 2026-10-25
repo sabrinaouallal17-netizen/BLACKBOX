@@ -450,6 +450,7 @@ PICK_ACCEPT["feedback-files"] = () => "image/*,video/*";
 /* ---------- Events ---------- */
 Object.assign(actions, {
   "fb-new": () => openFeedbackForm(null),
+  "new-feedback": () => { if (route().name !== "feedback") location.hash = "#feedback"; openFeedbackForm(null); },
   "fb-edit": (el) => openFeedbackForm(el.dataset.id),
   "fb-cancel": () => closeFeedbackForm(),
   "fb-delete": (el) => deleteFeedback(el.dataset.id),
@@ -465,7 +466,7 @@ Object.assign(actions, {
     render();
   },
 });
-Object.assign(ACTION_PERMS, { "fb-new": "edit", "fb-edit": "edit", "fb-convert": "edit", "fb-set-status": "edit", "fb-remove-att": "edit" });
+Object.assign(ACTION_PERMS, { "fb-new": "edit", "new-feedback": "edit", "fb-edit": "edit", "fb-convert": "edit", "fb-set-status": "edit", "fb-remove-att": "edit" });
 
 const FB_FIELD = { "fb-in-title": "title", "fb-in-desc": "desc", "fb-in-author": "author", "fb-in-source": "source", "fb-in-date": "date", "fb-in-category": "category", "fb-in-priority": "priority", "fb-in-status": "status", "fb-in-tags": "tags" };
 const FB_FILTER = { "fb-f-category": "category", "fb-f-source": "source", "fb-f-priority": "priority", "fb-f-sort": "sort" };

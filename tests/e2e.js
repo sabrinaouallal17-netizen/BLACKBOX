@@ -441,22 +441,27 @@ const fsGet = async (path) => (await fetch(`http://127.0.0.1:8080/v1/projects/de
 
   // Patch notes
   await go(A, 'updates', '.updates-page');
-  await A.click('[data-action=new-update]');
-  await A.waitForSelector('#upd-title');
-  await A.fill('#upd-title', 'UPDATE 1: Dice'); await A.fill('#upd-version', 'v1.0'); await A.fill('#upd-summary', 'The first big update.');
+  await A.click('.coll-toolbar [data-action=new-update]');
+  await A.waitForSelector('#doc-body h2');
+  await A.fill('#doc-title', 'UPDATE 1: Dice'); await A.fill('#doc-version', 'v1.0'); await A.fill('#doc-summary', 'The first big update.');
   await A.click('[data-action=fill-update]');
-  ok((await A.inputValue('#upd-new')).split('\n').includes('T1 dice'), 'fill from completed work');
-  await A.fill('#upd-balance', 'Rare odds **2x** higher');
-  await A.click('button[name=intent][value=publish]');
-  await A.waitForSelector('.patch');
-  ok((await A.textContent('.patch-sections')).includes('T1 dice') && await A.locator('.patch-sec strong').count() === 1, 'published patch notes with sections and formatting');
+  ok((await A.textContent('#doc-body')).includes('T1 dice'), 'fill from completed work');
+  await A.evaluate(() => { const li = document.querySelector('#doc-body h2 + ul > li'); const r = document.createRange(); r.selectNodeContents(li); r.collapse(false); document.getElementById('doc-body').focus(); getSelection().removeAllRanges(); getSelection().addRange(r); });
+  await A.keyboard.type('Rare odds '); await A.keyboard.press('Control+b'); await A.keyboard.type('2x'); await A.keyboard.press('Control+b');
+  await A.waitForSelector('#doc-save .doc-save.saved');
+  await A.waitForFunction(() => updates.some((u) => u.title === 'UPDATE 1: Dice'));
+  await A.click('.doc-topbar [data-action=preview-update][data-then=publish]');
+  await A.waitForSelector('.doc-preview-bar [data-action=publish-update]');
+  await A.click('.doc-preview-bar [data-action=publish-update]');
+  await A.waitForSelector('.doc-read-actions');
+  ok((await A.textContent('.doc-read')).includes('T1 dice') && await A.locator('.doc-read .doc-prose b').count() === 1, 'published patch notes with sections and formatting');
   await waitNotif(B, 'update');
   await B.click('#bell');
   ok((await B.textContent('.notif-panel')).includes('published UPDATE 1: Dice'), 'team notified of the update');
   await B.click('.np-item.unread');
-  await B.waitForSelector('.patch');
+  await B.waitForSelector('.doc-read .doc-prose');
   ok((await B.textContent('#view h1')) === 'UPDATE 1: Dice', 'the notification opens the patch notes');
-  ok(await B.locator('[data-action=edit-update]').count() === 0, 'members read patch notes, only admins edit');
+  ok(await B.locator('.doc-read-actions').count() === 0 && await B.locator('[contenteditable]').count() === 0, 'members read patch notes, only admins edit');
   await A.evaluate(() => projectsCol().doc(currentId).collection('updates').add({ title: 'Secret draft', status: 'draft', sections: {}, createdBy: user.uid, createdAt: Date.now() }));
   B.expectDenied = true;
   const draftRead = await B.evaluate(async () => { try { await projectsCol().doc(currentId).collection('updates').get(); return 'allowed'; } catch (e) { return e.code; } });

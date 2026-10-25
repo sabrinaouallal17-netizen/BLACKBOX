@@ -222,7 +222,7 @@ function viewUpdateHistory() {
   const counts = { all: all.length, published: all.filter((u) => u.status === "published").length, draft: all.filter((u) => u.status !== "published").length };
   const item = (u) => `<li class="tl-item ${u.status === "published" ? "is-pub" : "is-draft"}">
       <div class="tl-rail"><span class="tl-dot"></span><span class="tl-version">${esc(u.version || "—")}</span></div>
-      <article class="tl-card">
+      <article class="tl-card ${safeUrl(u.cover) ? "has-cover" : ""}">
         ${safeUrl(u.cover) ? `<a class="tl-cover" href="#updates.${esc(u.id)}" tabindex="-1"><img src="${src(u.cover)}" alt="" loading="lazy"></a>` : ""}
         <div class="tl-body">
           <div class="row-gap tl-meta">${u.version ? `<span class="tag-chip">${esc(u.version)}</span>` : ""}${admin ? statusChip(u) : ""}<span class="muted small">${icon("calendar", 13)} ${updateDate(u)}</span></div>
@@ -475,8 +475,11 @@ function closestIn(node, sel) { const el = editorEl(); const e = elOf(node)?.clo
 function restoreRange() {
   const el = editorEl();
   if (!el) return false;
-  el.focus({ preventScroll: true });
   const s = getSelection();
+  // The live selection wins when it is in the page (selectionchange arrives a little after typing).
+  const live = document.activeElement === el && s.rangeCount && el.contains(s.getRangeAt(0).commonAncestorContainer);
+  el.focus({ preventScroll: true });
+  if (live) return true;
   if (savedRange && el.contains(savedRange.commonAncestorContainer)) { s.removeAllRanges(); s.addRange(savedRange); }
   else if (!s.rangeCount || !el.contains(s.getRangeAt(0).commonAncestorContainer)) {
     const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); s.removeAllRanges(); s.addRange(r);
@@ -578,7 +581,8 @@ async function editLink() {
   if (!a && range.collapsed) fields.push({ label: "Text to show", optional: true, max: 200 });
   const res = await ask({ title: a ? "Edit link" : "Insert link", text: a ? "Clear the address to remove the link." : "", fields, ok: a ? "Save" : "Insert" });
   savedRange = range;
-  restoreRange();
+  editorEl()?.focus({ preventScroll: true });
+  const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
   if (!res) return;
   if (a && !res[0]) { removeLink(a); return markDirty(); }
   const href = normalizeHref(res[0]);
@@ -879,7 +883,7 @@ async function createUpdate() {
   });
   if (!ok) return;
   log("update.create", "drafted", title, "Updates", { ref: `update:${ref.id}` });
-  updDetailsOpen = true;
+  updDetailsOpen = innerWidth > 900;
   location.hash = `#updates.${ref.id}.edit`;
 }
 async function duplicateUpdate(id) {
@@ -1010,6 +1014,8 @@ document.addEventListener("input", (e) => {
 });
 document.addEventListener("change", (e) => { if (e.target.dataset?.meta) saveMeta(); });
 document.addEventListener("toggle", (e) => { if (e.target.id === "doc-details") updDetailsOpen = e.target.open; }, true);
+// New lines are paragraphs (not <div>) and formatting uses tags (not inline styles, which are stripped).
+document.addEventListener("focusin", (e) => { if (e.target.id === "doc-body") { exec("defaultParagraphSeparator", "p"); exec("styleWithCSS", false); } });
 document.addEventListener("focusout", (e) => { if (e.target.id === "doc-body" && ED.dirty) saveSheet(); });
 document.addEventListener("keydown", (e) => {
   if (e.target.id !== "doc-body") return;
