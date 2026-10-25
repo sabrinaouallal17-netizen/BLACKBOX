@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>BLACKBOX</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#08080c">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="BLACKBOX — manage and plan your game projects with your team.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="chat.css">
+  <link rel="stylesheet" href="bugs.css">
+  <link rel="stylesheet" href="feedback.css">
+  <link rel="stylesheet" href="analytics.css">
+  <link rel="stylesheet" href="docs.css">
+  <link rel="stylesheet" href="search.css">
+</head>
+<body>
+  <div class="boot" id="boot-screen"><span class="logo">BLACKBOX</span></div>
+
+  <!-- Shown when firebase-config.js has not been filled in yet -->
+  <section class="gate" id="setup-screen" hidden>
+    <div class="gate-card wide">
+      <span class="logo">BLACKBOX</span>
+      <h1 id="setup-title">Connect Firebase</h1>
+      <p id="setup-text">BLACKBOX stores projects and accounts in Firebase. Fill in <code>firebase-config.js</code> with your project's web config to start. The README walks through the setup step by step.</p>
+    </div>
+  </section>
+
+  <section class="gate" id="auth-screen" hidden>
+    <form class="gate-card" id="auth-form" novalidate>
+      <span class="logo">BLACKBOX</span>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" data-auth-mode="signin" class="on">Sign in</button>
+        <button type="button" role="tab" data-auth-mode="signup">Create account</button>
+      </div>
+      <label id="auth-name-row" hidden>Display name<input id="auth-name" name="name" maxlength="40" autocomplete="nickname"></label>
+      <label>Email<input id="auth-email" name="email" type="email" required autocomplete="email"></label>
+      <label>Password<input id="auth-password" name="password" type="password" required minlength="6" autocomplete="current-password"></label>
+      <p class="form-error" id="auth-error" role="alert" hidden></p>
+      <button type="submit" class="btn primary block" id="auth-submit">Sign in</button>
+      <button type="button" class="link small" id="forgot-btn">Forgot password?</button>
+      <div class="or-line"><span>or</span></div>
+      <button type="button" class="btn block google-btn" id="google-btn">
+        <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+        Continue with Google</button>
+    </form>
+  </section>
+
+  <section class="gate" id="verify-screen" hidden>
+    <div class="gate-card">
+      <span class="logo">BLACKBOX</span>
+      <h1>Check your inbox</h1>
+      <p>We sent a confirmation link to <b id="verify-email"></b>. Open it, then come back and press Continue.</p>
+      <p class="form-error" id="verify-error" role="alert" hidden></p>
+      <button type="button" class="btn primary block" id="verify-continue">Continue</button>
+      <div class="row-gap">
+        <button type="button" class="link small" id="verify-resend">Resend email</button>
+        <button type="button" class="link small" id="verify-signout">Use another account</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="app" id="app" hidden>
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <span class="logo">BLACKBOX</span>
+        <div class="row-gap">
+          <button class="icon-btn bell" id="bell" data-action="toggle-notifs" title="Notifications" aria-haspopup="dialog" aria-expanded="false" data-icon="bell"></button>
+          <button class="icon-btn" data-action="new-project" title="New project" data-icon="plus"></button>
+        </div>
+      </div>
+
+      <button type="button" class="side-search" id="search-btn" data-action="open-search" title="Search (Ctrl+K)"><span data-icon="search"></span><span class="grow">Search</span><kbd id="search-kbd">Ctrl K</kbd></button>
+
+      <div class="side-section" id="project-picker">
+        <div class="side-label">Project</div>
+        <select id="project-select" aria-label="Project" data-cs-class="project-cs"></select>
+      </div>
+
+      <nav class="side-nav" id="side-nav">
+        <a href="#overview" data-view="overview"><span data-icon="home"></span>Overview</a>
+        <a href="#tasks" data-view="tasks"><span data-icon="check"></span>Tasks</a>
+        <a href="#bugs" data-view="bugs"><span data-icon="bug"></span>Bugs</a>
+        <a href="#feedback" data-view="feedback"><span data-icon="inbox"></span>Feedback</a>
+        <a href="#chat" data-view="chat"><span data-icon="chat"></span>Chat</a>
+        <a href="#assets" data-view="assets"><span data-icon="images"></span>Assets</a>
+        <a href="#updates" data-view="updates"><span data-icon="history"></span>Updates</a>
+        <a href="#analytics" data-view="analytics"><span data-icon="chart"></span>Analytics</a>
+        <a href="#activity" data-view="activity"><span data-icon="pulse"></span>Activity</a>
+        <a href="#project" data-view="project"><span data-icon="sliders"></span>Project settings</a>
+      </nav>
+
+      <div class="side-section" id="side-collections-section">
+        <div class="side-label row">Collections <button class="icon-btn small" data-action="new-collection" title="New collection" data-icon="plus"></button></div>
+        <ul class="side-collections" id="side-collections"></ul>
+      </div>
+
+      <div class="side-section team" id="side-team-section">
+        <div class="side-label row"><a href="#team">Team</a> <span id="team-count">0</span></div>
+        <div class="avatar-stack" id="side-team"></div>
+      </div>
+
+      <button class="install-btn" id="install-btn" data-action="install-app" hidden><span data-icon="download"></span>Install the app</button>
+      <div class="save-status" id="save-status" role="status"></div>
+      <div class="side-user" id="side-user"></div>
+    </aside>
+
+    <div class="scrim" id="scrim" hidden></div>
+    <main class="main">
+      <header class="mobile-top">
+        <button class="icon-btn bare" id="menu-btn" title="Menu" aria-label="Open menu" data-icon="menu"></button>
+        <span class="mobile-title ellipsis" id="mobile-title">BLACKBOX</span>
+        <button class="icon-btn bare" data-action="open-search" title="Search" data-icon="search"></button>
+        <button class="icon-btn bare bell" data-action="toggle-notifs" title="Notifications" data-icon="bell"></button>
+      </header>
+      <div id="invites"></div>
+      <div class="panel" id="view"></div>
+    </main>
+    <nav class="mobile-tabs" id="mobile-tabs" aria-label="Main">
+      <a href="#overview" data-tab="overview"><span data-icon="home"></span>Home</a>
+      <a href="#tasks" data-tab="tasks"><span data-icon="check"></span>Tasks</a>
+      <a href="#chat" data-tab="chat"><span data-icon="chat"></span>Chat</a>
+      <a href="#assets" data-tab="assets"><span data-icon="images"></span>Assets</a>
+      <button type="button" data-action="open-menu"><span data-icon="menu"></span>More</button>
+    </nav>
+  </div>
+
+  <div class="menu" id="popover" role="menu" hidden></div>
+  <div class="lightbox" id="lightbox" hidden></div>
+  <div class="notif-panel" id="notif-panel" role="dialog" aria-label="Notifications" hidden></div>
+  <div class="mention-picker" id="mention-picker" role="listbox" hidden></div>
+  <input type="file" id="file-picker" hidden>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <div id="search-root"></div>
+
+  <dialog id="task-dialog">
+    <form method="dialog" id="task-form">
+      <h2 id="task-dialog-title">New task</h2>
+      <fieldset class="plain">
+      <label>Title<input id="task-title" name="title" required maxlength="80"></label>
+      <label>Description<textarea id="task-desc" name="desc" rows="2" maxlength="2000"></textarea></label>
+      <div class="bug-only" hidden>
+        <label>Steps to reproduce<textarea id="bug-steps" name="steps" rows="4" maxlength="3000" placeholder="One step per line, e.g.&#10;Open the shop&#10;Buy the starter dice pack"></textarea></label>
+        <div class="form-grid">
+          <label>Expected result<textarea id="bug-expected" name="expected" rows="2" maxlength="1000" placeholder="What should happen"></textarea></label>
+          <label>Actual result<textarea id="bug-actual" name="actual" rows="2" maxlength="1000" placeholder="What happens instead"></textarea></label>
+        </div>
+      </div>
+      <div class="form-grid">
+        <label>Type
+          <select id="task-type" name="type"><option value="task">Task</option><option value="bug">Bug</option></select>
+        </label>
+        <label>Priority
+          <select id="task-priority" name="priority">
+            <option value="critical">Critical</option><option value="high">High</option>
+            <option value="medium" selected>Medium</option><option value="low">Low</option>
+          </select>
+        </label>
+        <label>Status
+          <select id="task-status" name="status">
+            <option value="todo">To do</option><option value="progress">In progress</option>
+            <option value="review">In review</option><option value="done">Done</option>
+          </select>
+        </label>
+        <label><span id="task-owner-label">Owner</span><select name="owner" id="task-owner"></select></label>
+      </div>
+      <div class="bug-only" hidden>
+        <div class="form-grid">
+          <label>Severity
+            <select id="bug-severity" name="severity"><option value="blocker">Blocker</option><option value="major" selected>Major</option><option value="minor">Minor</option><option value="trivial">Trivial</option></select>
+          </label>
+          <label>Frequency
+            <select id="bug-frequency" name="frequency"><option value="always">Always</option><option value="often">Often</option><option value="sometimes" selected>Sometimes</option><option value="rare">Rare</option></select>
+          </label>
+          <label>Platform<input id="bug-platform" name="platform" list="bug-platforms" maxlength="40" placeholder="Roblox, PC, iOS…" autocomplete="off"><datalist id="bug-platforms"></datalist></label>
+          <label>Device<input id="bug-device" name="device" maxlength="60" placeholder="iPhone 13, RTX 3060…" autocomplete="off"></label>
+          <label>Game version<input id="bug-version" name="gameVersion" maxlength="30" placeholder="1.4.2" autocomplete="off"></label>
+          <label>Reported by<select id="bug-reporter" name="reporter"></select></label>
+        </div>
+        <div class="bug-atts-field"><span class="field-label">Attachments <span class="muted small">screenshots, videos, logs</span></span><div id="bug-atts"></div></div>
+      </div>
+      </fieldset>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" id="cancel-task-btn">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="item-dialog" class="wide-dialog">
+    <form id="item-form" data-drafts>
+      <h2 id="item-dialog-title">New item</h2>
+      <fieldset class="plain">
+      <div class="item-form-grid">
+        <div>
+          <label class="image-pick" data-drop="item-image" title="Choose image"><input type="file" id="item-file" accept="image/*" hidden><div id="item-image-preview"></div></label>
+          <button type="button" class="link small" id="item-remove-image">Remove image</button>
+        </div>
+        <div class="item-fields">
+          <label>Name<input id="item-name" required maxlength="60" autocomplete="off"></label>
+          <label>Description<textarea id="item-desc" rows="5" maxlength="400"></textarea></label>
+        </div>
+      </div>
+      </fieldset>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" id="item-cancel">Cancel</button>
+        <button type="submit" class="btn primary" id="item-save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="whats-new-dialog" class="wide-dialog">
+    <form method="dialog">
+      <h2>What's new in BLACKBOX</h2>
+      <div id="whats-new-list" class="whats-new-list"></div>
+      <div class="dialog-actions"><span class="spacer"></span><button class="btn primary">Close</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="ask-dialog">
+    <form id="ask-form">
+      <h2 id="ask-title"></h2>
+      <p class="ask-text" id="ask-text" hidden></p>
+      <div id="ask-fields"></div>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" id="ask-cancel">Cancel</button>
+        <button type="submit" class="btn primary" id="ask-ok">OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/idiomorph@0.7.3/dist/idiomorph.min.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="icons.js"></script>
+  <script src="ui.js"></script>
+  <script src="changelog.js"></script>
+  <script src="app.js"></script>
+  <script src="notify.js"></script>
+  <script src="board.js"></script>
+  <script src="updates.js"></script>
+  <script src="chat.js"></script>
+  <script src="bugs.js"></script>
+  <script src="feedback.js"></script>
+  <script src="analytics.js"></script>
+  <script src="search.js"></script>
+  <script src="boot.js"></script>
+</body>
+</html>

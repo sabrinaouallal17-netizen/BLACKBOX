@@ -1,0 +1,210 @@
+rules_version = '2';
+
+// BLACKBOX security rules.
+// Only verified accounts get in. A project is visible to its members and to people invited by email.
+// Invited people can only add themselves (accept) or remove their invitation (decline).
+// Roles per project: owner (ownerId), admin, member (default), viewer (read and chat).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function myEmail() {
+      return request.auth.token.email.lower();
+    }
+    function isMember(data) {
+      return signedIn() && request.auth.uid in data.memberIds;
+    }
+    function isInvited(data) {
+      return signedIn() && myEmail() in data.invitedEmails;
+    }
+    function roleOf(data) {
+      return request.auth.uid == data.ownerId ? 'owner' : data.get('roles', {}).get(request.auth.uid, 'member');
+    }
+    function canEdit(data) {
+      return isMember(data) && roleOf(data) in ['owner', 'admin', 'member'];
+    }
+    function isAdmin(data) {
+      return isMember(data) && roleOf(data) in ['owner', 'admin'];
+    }
+    function onlyChanged(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+    function acceptsInvite() {
+      return onlyChanged(['memberIds', 'members', 'invitedEmails'])
+        && request.resource.data.memberIds.toSet() == resource.data.memberIds.toSet().union([request.auth.uid].toSet())
+        && request.resource.data.invitedEmails.toSet() == resource.data.invitedEmails.toSet().difference([myEmail()].toSet())
+        && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([request.auth.uid]);
+    }
+    function declinesInvite() {
+      return onlyChanged(['invitedEmails'])
+        && request.resource.data.invitedEmails.toSet() == resource.data.invitedEmails.toSet().difference([myEmail()].toSet());
+    }
+    function validMemberUpdate() {
+      let before = resource.data;
+      let after = request.resource.data;
+      return after.ownerId == before.ownerId
+        && before.ownerId in after.memberIds
+        // Only the owner adds or removes other people and edits their member entries;
+        // anyone else can only leave and update their own entry.
+        && (request.auth.uid == before.ownerId
+            || (after.memberIds.toSet().hasAll(before.memberIds.toSet().difference([request.auth.uid].toSet()))
+                && after.memberIds.toSet().difference(before.memberIds.toSet()).size() == 0
+                && after.members.diff(before.members).affectedKeys().hasOnly([request.auth.uid])));
+    }
+    // Which project fields each role may change.
+    function fieldsAllowed() {
+      let role = roleOf(resource.data);
+      let keys = request.resource.data.diff(resource.data).affectedKeys();
+      return role == 'owner'
+        || (role == 'admin' && request.resource.data.get('roles', {}).values().hasOnly(['admin', 'member', 'viewer']))
+        || (role == 'member' && keys.hasOnly(['collections', 'release', 'assetFolders', 'members', 'memberIds']))
+        || (role == 'viewer' && keys.hasOnly(['members', 'memberIds']));
+    }
+
+    // Profiles (photo, name, role, contact email) are visible to signed-in people; each person edits their own.
+    match /profiles/{uid} {
+      allow read: if signedIn();
+      allow write: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /projects/{projectId} {
+      function project() {
+        return get(/databases/$(database)/documents/projects/$(projectId)).data;
+      }
+
+      allow read: if isMember(resource.data) || isInvited(resource.data);
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.memberIds == [request.auth.uid];
+      allow update: if (isMember(resource.data) && validMemberUpdate() && fieldsAllowed())
+        || (isInvited(resource.data) && (acceptsInvite() || declinesInvite()));
+      allow delete: if isMember(resource.data) && resource.data.ownerId == request.auth.uid;
+
+      // Tasks, collection items and assets: members create and edit; members delete their own, admins anything.
+      // The creator field is set to yourself on create and never changes, so "delete your own" holds.
+      function keeps(field) {
+        return request.resource.data.get(field, '') == resource.data.get(field, '');
+      }
+      match /tasks/{taskId} {
+        allow read: if isMember(project());
+        allow create: if canEdit(project()) && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(project()) && keeps('createdBy');
+        allow delete: if isAdmin(project()) || (canEdit(project()) && resource.data.get('createdBy', '') == request.auth.uid);
+      }
+      match /items/{itemId} {
+        allow read: if isMember(project());
+        allow create: if canEdit(project()) && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(project()) && keeps('createdBy');
+        allow delete: if isAdmin(project()) || (canEdit(project()) && resource.data.get('createdBy', '') == request.auth.uid);
+      }
+      match /assets/{assetId} {
+        allow read: if isMember(project());
+        allow create: if canEdit(project()) && request.resource.data.uid == request.auth.uid;
+        allow update: if canEdit(project()) && keeps('uid');
+        allow delete: if isAdmin(project()) || (canEdit(project()) && resource.data.get('uid', '') == request.auth.uid);
+      }
+      // Patch notes: published ones are read by everyone; drafts and writing are for admins.
+      // Each update's pages (sheets) follow the update they belong to.
+      match /updates/{updateId} {
+        allow read: if isAdmin(project()) || (isMember(project()) && resource.data.status == 'published');
+        allow write: if isAdmin(project());
+        match /sheets/{sheetId} {
+          allow read: if isAdmin(project()) || (isMember(project())
+            && get(/databases/$(database)/documents/projects/$(projectId)/updates/$(updateId)).data.status == 'published');
+          allow write: if isAdmin(project());
+        }
+      }
+      // Player feedback, entered by the team.
+      match /feedback/{feedbackId} {
+        allow read: if isMember(project());
+        allow create: if canEdit(project()) && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(project()) && keeps('createdBy');
+        allow delete: if isAdmin(project()) || (canEdit(project()) && resource.data.get('createdBy', '') == request.auth.uid);
+      }
+      // Analytics entries (CCU, revenue, new-user sources), entered by the team.
+      match /analytics/{entryId} {
+        allow read: if isMember(project());
+        allow create: if canEdit(project()) && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(project()) && keeps('createdBy');
+        allow delete: if isAdmin(project()) || (canEdit(project()) && resource.data.get('createdBy', '') == request.auth.uid);
+      }
+      // Comments on bugs, tasks and feedback: everyone in the project comments; authors edit theirs.
+      match /comments/{commentId} {
+        allow read: if isMember(project());
+        allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid;
+        allow update: if isMember(project()) && resource.data.uid == request.auth.uid && keeps('uid');
+        allow delete: if isMember(project()) && (resource.data.uid == request.auth.uid || isAdmin(project()));
+      }
+      // "Typing…" indicators: one document per person, written only by that person.
+      match /typing/{uid} {
+        allow read: if isMember(project());
+        allow write: if isMember(project()) && uid == request.auth.uid;
+      }
+      // Videos, voice messages and files, stored in chunks under 1 MB (no paid Storage needed).
+      match /files/{fileId} {
+        function fileOwner() {
+          return get(/databases/$(database)/documents/projects/$(projectId)/files/$(fileId)).data.uid;
+        }
+        allow read: if isMember(project());
+        allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid
+          && request.resource.data.size <= 26214400 && request.resource.data.chunks <= 30;
+        allow delete: if isMember(project()) && (resource.data.uid == request.auth.uid || isAdmin(project()));
+        match /chunks/{chunkId} {
+          allow read: if isMember(project());
+          allow create: if isMember(project()) && fileOwner() == request.auth.uid;
+          allow delete: if isMember(project()) && (isAdmin(project()) || fileOwner() == request.auth.uid);
+        }
+      }
+      match /activity/{entryId} {
+        allow read: if isMember(project());
+        // The log can't be erased by the people it records; only the owner (deleting the project) removes it.
+        allow delete: if isMember(project()) && project().ownerId == request.auth.uid;
+        allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid;
+      }
+      // Chat: everyone in the project (viewers too) writes; authors edit, authors and admins delete.
+      // Anyone in the project reacts (only the reactions map changes); members and up pin.
+      function reacts() {
+        return isMember(project()) && onlyChanged(['reactions']);
+      }
+      function pins() {
+        return canEdit(project()) && onlyChanged(['pinned', 'pinnedBy', 'pinnedAt']);
+      }
+      match /messages/{messageId} {
+        allow read: if isMember(project());
+        allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid;
+        allow update: if (isMember(project()) && resource.data.uid == request.auth.uid
+          && request.resource.data.uid == resource.data.uid) || reacts() || pins();
+        allow delete: if isMember(project())
+          && (resource.data.uid == request.auth.uid || isAdmin(project()));
+      }
+      // Only channels listed in the project accept messages.
+      match /channels/{channelId}/messages/{messageId} {
+        allow read: if isMember(project());
+        allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid
+          && channelId in project().get('channelIds', []);
+        allow update: if ((isMember(project()) && resource.data.uid == request.auth.uid
+          && request.resource.data.uid == resource.data.uid) || reacts() || pins()) && channelId in project().get('channelIds', []);
+        allow delete: if isMember(project())
+          && (resource.data.uid == request.auth.uid || isAdmin(project()));
+      }
+      // Notifications: a member writes one to another member; only the recipient reads it or marks it
+      // read. The owner can remove them when deleting the project.
+      match /notifications/{notifId} {
+        allow create: if isMember(project())
+          && request.resource.data.from == request.auth.uid
+          && request.resource.data.to in project().memberIds
+          && request.resource.data.read == false
+          && request.resource.data.type in ['mention', 'assign', 'update', 'role']
+          && (request.resource.data.type != 'role' || isAdmin(project()))
+          && (request.resource.data.type != 'update' || isAdmin(project()))
+          && request.resource.data.text is string && request.resource.data.text.size() <= 200
+          && request.resource.data.at <= request.time.toMillis() + 60000;
+        // The owner also lists them, to remove them when deleting the project.
+        allow read: if signedIn() && (resource.data.to == request.auth.uid || project().ownerId == request.auth.uid);
+        allow update: if signedIn() && resource.data.to == request.auth.uid && onlyChanged(['read']);
+        allow delete: if signedIn() && (resource.data.to == request.auth.uid || project().ownerId == request.auth.uid);
+      }
+    }
+  }
+}
