@@ -468,7 +468,7 @@ document.addEventListener("submit", async (e) => {
     if (!changes.length) { anState.editing = null; clearDrafts(f); toast("Nothing to save."); return render(); }
     if (await act(() => sub("analytics").doc(before.id).update({ ...data, updatedAt: Date.now() }), "Entry updated")) {
       clearDrafts(f);
-      anState.editing = null;
+      if (anState.editing === before.id) anState.editing = null;
       log("analytics.update", `updated a ${AN_KINDS[before.kind].noun}`, anLabel(after), "Analytics", { ref: `analytics:${before.id}`, changes });
       render();
     }
@@ -606,7 +606,8 @@ function revenueSettingsCard() {
 }
 async function saveRevenueSettings(f) {
   if (!can("manage")) return toast("Only admins and the owner can change this.", true);
-  const d = revDraft || revenueDraftFrom(project());
+  const draft = revDraft;
+  const d = draft || revenueDraftFrom(project());
   let next;
   if (d.mode === "money") {
     const currency = String(d.currency || "").trim().toUpperCase().slice(0, 8);
@@ -618,7 +619,7 @@ async function saveRevenueSettings(f) {
   const label = (r) => (r.mode === "money" ? `${r.currency} (${r.symbol})` : "Robux");
   if (label(before) === label(next) && project().revenue) { revDraft = null; return toast("Nothing to save."); }
   if (await act(() => updateProject({ revenue: next }), "Revenue display saved")) {
-    revDraft = null;
+    if (revDraft === draft) revDraft = null; // keep choices made while saving
     clearDrafts(f);
     log("project.settings", "changed the revenue display", label(next), "Settings", { changes: [{ field: "Revenue", from: label(before), to: label(next) }] });
     render();

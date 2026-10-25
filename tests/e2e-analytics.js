@@ -235,6 +235,7 @@ const period = async (page, p) => { await page.click(`[data-an-period="${p}"]`);
   await A.click('#cs-an-rev-preset'); await pick(A, 'EUR');
   await A.waitForFunction(() => document.querySelector('#an-rev-preview')?.textContent.startsWith('€'));
   ok((await A.textContent('#an-rev-preview')) === '€1,234,567.50', 'preview €1,234,567.50');
+  await A.locator('.an-rev-card').screenshot({ path: process.env.OUT + '/an-revenue-card.png' });
   await A.click('.an-rev-card button.primary');
   await A.waitForFunction(() => project().revenue?.currency === 'EUR');
   ok(JSON.stringify(await A.evaluate(() => project().revenue)) === '{"mode":"money","currency":"EUR","symbol":"€"}', 'saved revenue {money, EUR, €}');

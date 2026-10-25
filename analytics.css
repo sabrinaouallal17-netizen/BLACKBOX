@@ -110,7 +110,7 @@
 .an-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .an-mode-opt { display: block !important; cursor: pointer; }
 .an-mode-opt input { position: absolute; opacity: 0; pointer-events: none; }
-.an-mode-opt span { display: grid; gap: 3px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel); color: var(--soft); height: 100%; }
+.an-mode-opt span { display: grid; align-content: start; gap: 3px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel); color: var(--soft); height: 100%; }
 .an-mode-opt span svg { color: var(--muted); margin-bottom: 4px; }
 .an-mode-opt b { color: var(--text); font-size: 14px; }
 .an-mode-opt small { color: var(--muted); font-size: 12px; }

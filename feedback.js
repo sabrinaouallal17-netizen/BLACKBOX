@@ -55,7 +55,9 @@ const fbLinkedTask = (f) => (f?.taskId ? tasks.find((t) => t.id === f.taskId) ||
 
 const fbStatusPill = (s) => { const v = FEEDBACK_STATUS[s] || FEEDBACK_STATUS.new; return `<span class="fb-pill c-${v.color}">${icon(v.icon, 14, 2)}${v.label}</span>`; };
 const fbCategoryBadge = (c) => { const v = FEEDBACK_CATEGORY[c] || FEEDBACK_CATEGORY.suggestion; return `<span class="fb-cat c-${v.color}">${icon(v.icon, 14)}${v.label}</span>`; };
-const fbSource = (s) => { const v = FEEDBACK_SOURCES[s] || FEEDBACK_SOURCES.other; return `<span class="fb-src">${icon(v.icon, 14)}${v.label}</span>`; };
+// Roblox has a filled platform glyph; the other sources use regular icons.
+const fbSourceIcon = (s, size = 14) => (s === "roblox" ? platformIcon("roblox", size) : icon((FEEDBACK_SOURCES[s] || FEEDBACK_SOURCES.other).icon, size));
+const fbSource = (s) => { const v = FEEDBACK_SOURCES[s] || FEEDBACK_SOURCES.other; return `<span class="fb-src">${fbSourceIcon(FEEDBACK_SOURCES[s] ? s : "other")}${v.label}</span>`; };
 const fbOptions = (map, value) => Object.entries(map).map(([k, v]) => `<option value="${k}" ${k === value ? "selected" : ""}>${esc(v.label)}</option>`).join("");
 
 function fbFiltered() {
@@ -380,10 +382,15 @@ async function convertFeedback(id, type) {
   } : {};
   fbConverting = id;
   render();
+  // bugs.js creates (and logs) the task itself and reports its own errors.
+  let made = null;
+  if (typeof createTaskFrom === "function") {
+    made = await createTaskFrom({ ...base, ...bugFields });
+    if (!made) { fbConverting = null; render(); return; }
+  }
   const taskId = await act(async () => {
-    let newId;
-    if (typeof createTaskFrom === "function") newId = await createTaskFrom({ ...base, ...bugFields });
-    else {
+    let newId = made;
+    if (!newId) {
       const order = Math.max(0, ...tasks.map((t) => t.order ?? 0)) + 1;
       const ref = await sub("tasks").add({ ...base, ...bugFields, order, createdBy: user.uid, createdAt: Date.now() });
       newId = ref.id;
