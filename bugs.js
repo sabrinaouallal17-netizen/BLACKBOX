@@ -450,7 +450,7 @@ async function sendComment(form) {
     cmPending[target] = [];
     const [kind, id] = target.split(":");
     const t = kind === "task" ? tasks.find((x) => x.id === id) : null;
-    const plain = detokenizeMentions(text);
+    const plain = detokenizeMentions(text).replace(/(\*\*|__|~~|`)/g, "");
     if (t) log(t.type === "bug" ? "bug.comment" : "task.comment", "commented on", t.title, t.type === "bug" ? "Bugs" : "Tasks", { ref: target, detail: plain.slice(0, 140) || "(attachment)" });
     for (const uid of mentionedIds(text)) notify(uid, "mention", plain.slice(0, 120), commentLink(target));
   }
@@ -566,7 +566,11 @@ async function deleteBug(id) {
   if (!(await act(() => sub("tasks").doc(id).delete(), "Bug deleted"))) return;
   log("bug.delete", "deleted", t.title, "Bugs", { ref: `task:${id}` });
   location.hash = "#bugs";
-  const mine = comments.filter((c) => c.target === `task:${id}` && (c.uid === user.uid || can("manage")));
+  await deleteCommentsOf(`task:${id}`);
+}
+// Removes the comments of a deleted bug, task or feedback that this person may delete (admins: all).
+async function deleteCommentsOf(target) {
+  const mine = comments.filter((c) => c.target === target && (c.uid === user.uid || can("manage")));
   for (let i = 0; i < mine.length; i += 400) {
     const batch = db.batch();
     mine.slice(i, i + 400).forEach((c) => batch.delete(sub("comments").doc(c.id)));

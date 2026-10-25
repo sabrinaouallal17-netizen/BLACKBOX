@@ -349,6 +349,7 @@ async function deleteFeedback(id) {
   if (!(await ask({ title: `Delete "${f.title}"?`, text: f.taskId ? "The task or bug made from it stays." : "This removes it for the whole team.", ok: "Delete", danger: true }))) return;
   if (await act(() => sub("feedback").doc(id).delete(), "Feedback deleted")) {
     log("feedback.delete", "deleted feedback", f.title, "Feedback", { ref: `feedback:${id}` });
+    if (typeof deleteCommentsOf === "function") deleteCommentsOf(`feedback:${id}`);
     if (route().name === "feedback" && route().arg === id) location.hash = "#feedback";
   }
 }

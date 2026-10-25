@@ -1444,7 +1444,10 @@ async function deleteTask(id) {
   if (!t) return;
   const ok = await ask({ title: `Delete "${t.title}"?`, text: "This removes it for the whole team.", ok: "Delete", danger: true });
   if (!ok) return;
-  if (await act(() => sub("tasks").doc(id).delete(), "Deleted")) log(t.type === "bug" ? "bug.delete" : "task.delete", "deleted", t.title, t.type === "bug" ? "Bugs" : "Tasks");
+  if (await act(() => sub("tasks").doc(id).delete(), "Deleted")) {
+    log(t.type === "bug" ? "bug.delete" : "task.delete", "deleted", t.title, t.type === "bug" ? "Bugs" : "Tasks", { ref: `task:${id}` });
+    deleteCommentsOf(`task:${id}`);
+  }
 }
 
 /* ---------- Task dialog ---------- */

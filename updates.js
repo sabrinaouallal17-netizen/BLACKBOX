@@ -181,7 +181,10 @@ async function sheetsArrived(id) {
   // Only from the server's answer: an empty cache must not create a duplicate first page.
   if (list.length || sheetLive.fromCache || ED.id !== id || !can("manage") || converting.has(id)) return;
   const u = updates.find((x) => x.id === id);
-  if (!u) return;
+  const r = docRoute();
+  // Only while this update is open in the editor, and only for updates that never had pages (legacy):
+  // pages vanishing during a deletion must not bring a starter page back.
+  if (!u || u.sheetOrder?.length || route().name !== "updates" || r.id !== id || r.mode !== "edit") return;
   converting.add(id);
   const ref = sheetCol(id).doc();
   const html = hasLegacy(u) ? sanitizeHtml(legacyHtml(u)) : starterHtml();
@@ -913,12 +916,13 @@ async function setUpdateStatus(id, status) {
 async function deleteUpdate(id) {
   const u = updates.find((x) => x.id === id);
   if (!u || !(await ask({ title: `Delete ${u.title || "this update"}?`, text: "The update and all its pages are removed for everyone. This can't be undone.", ok: "Delete", danger: true }))) return;
-  if (ED.id === id) { clearTimeout(ED.timer); ED.dirty = false; }
+  if (ED.id === id) { clearTimeout(ED.timer); clearTimeout(ED.metaTimer); ED.dirty = false; ED.metaDraft = {}; }
+  converting.add(id); // its pages disappear first: never recreate a starter page meanwhile
   const ok = await act(async () => {
     await deleteDocs((await sheetCol(id).get()).docs);
     await updRef(id).delete();
   }, "Update deleted");
-  if (!ok) return;
+  if (!ok) { converting.delete(id); return; }
   log("update.delete", "deleted", u.title, "Updates", { ref: `update:${id}` });
   if (docRoute().id === id) location.hash = "#updates";
 }
