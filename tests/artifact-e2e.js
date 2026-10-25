@@ -167,9 +167,15 @@ const blobs = new Map();
 
   // Patch notes
   await go(A, 'updates', '[data-action=new-update]');
-  await A.click('[data-action=new-update]'); await A.fill('#upd-title', 'UPDATE 1'); await A.fill('#upd-new', 'Dice\nQuests');
-  await A.click('button[name=intent][value=publish]');
-  await A.waitForSelector('.patch');
+  await A.click('.coll-toolbar [data-action=new-update]'); await A.waitForSelector('#doc-body h2');
+  await A.fill('#doc-title', 'UPDATE 1');
+  await A.evaluate(() => { const li = document.querySelector('#doc-body h2 + ul > li'); const r = document.createRange(); r.selectNodeContents(li); r.collapse(false); document.getElementById('doc-body').focus(); getSelection().removeAllRanges(); getSelection().addRange(r); });
+  await A.keyboard.type('Dice'); await A.keyboard.press('Enter'); await A.keyboard.type('Quests');
+  await A.waitForSelector('#doc-save .doc-save.saved');
+  await A.waitForFunction(() => updates.some((u) => u.title === 'UPDATE 1'));
+  await A.click('.doc-topbar [data-action=preview-update][data-then=publish]');
+  await A.click('.doc-preview-bar [data-action=publish-update]');
+  await A.waitForSelector('.doc-read-actions');
   await waitNotif(B, 'update');
   ok(true, 'published update notifies the team');
 

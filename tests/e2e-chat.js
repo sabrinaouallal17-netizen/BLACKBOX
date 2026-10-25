@@ -152,7 +152,7 @@ const msg = (page, text) => page.locator('.msg', { hasText: text }).first();
   ok(!(await A.isVisible('.typing-line.on:has-text("Alice")')), 'you never see yourself typing');
   await B.type('#chat-text', 'ce!'); await B.press('#chat-text', 'Enter');
   await A.waitForSelector('.msg-text:has-text("Hello Alice!")');
-  await A.waitForSelector('.typing-line:not(.on)', { timeout: 10000 });
+  await A.waitForSelector('.typing-line:not(.on)', { state: 'attached', timeout: 10000 });
   ok(true, 'indicator disappears when the message is sent');
   const C = await A.evaluate(() => {
     const fakes = ['fakeA', 'fakeB', 'fakeC', 'fakeD'];

@@ -3,6 +3,27 @@
 // What's new in BLACKBOX itself (shown from the sidebar). Newest first; add an entry for every change.
 const CHANGELOG = [
   {
+    version: "1.7",
+    date: "2026-10-25",
+    title: "Feedback, analytics and a real changelog editor",
+    items: [
+      "New Feedback page: collect player feedback from Discord, Roblox, YouTube, email and more, with category, priority, status, screenshots and videos",
+      "Search, filter and sort feedback, discuss it in comments, and turn any feedback into a task or a bug report in one click (the link stays visible on both sides)",
+      "Full bug reports: steps to reproduce, expected vs actual, severity, frequency, platform, device, game version and screenshot, video or file attachments",
+      "Every bug has its own page with a status tracker (Open → In progress → To test → Resolved, plus Reopen), comments with @mentions, links to tasks, feedback and updates, and a full change history",
+      "New Analytics page: track concurrent players (CCU), revenue and where new players come from (Others, Search, Friends), with charts, period filters and period-over-period comparison",
+      "Choose how revenue is shown in Project settings: Robux, or money in USD, EUR, GBP, JPY, CAD, BRL or your own currency",
+      "Updates is now a real changelog editor: headings, lists, checklists, links, tables, images and videos, several pages per update, autosave and a preview before publishing",
+      "The Updates page shows your full version history, with search, drafts, duplicate and unpublish; new icon in the menu",
+      "Global search: press Ctrl+K (⌘K on Mac) or the Search button to find tasks, bugs, feedback, chat messages, documents and updates, filtered by type",
+      "Chat: see who is online, away or offline, and who is typing",
+      "Chat: react to messages with emojis (see who reacted), pin important messages and find them in the pinned panel",
+      "Chat: share videos that play right in the conversation, and record voice messages you can listen to before sending",
+      "Images, videos and files stored in pieces so large files work without a paid Firebase plan",
+      "Deleting a bug or a feedback also removes its comments",
+    ],
+  },
+  {
     version: "1.6",
     date: "2026-10-23",
     title: "Ready for everyone",
