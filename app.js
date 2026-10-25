@@ -224,12 +224,12 @@ const FILE_RULES = {
 };
 // Turns a picked file into a URL saved with the data. Artifact: the page's own file storage.
 // Firebase: a compressed image stored inline (a Firestore document holds at most 1 MB).
-async function storeFile(file, purpose) {
-  const rule = FILE_RULES[purpose];
+async function storeFile(file, purpose, pid = currentId) {
+  const rule = FILE_RULES[purpose] || FILE_RULES.chat;
   const image = isImageType(file.type);
   const gif = isGif(file);
   if (ARTIFACT) {
-    if (!image && !["chat", "asset"].includes(purpose)) throw fail("unsupported", "Choose an image file.");
+    if (!image && !MEDIA_PURPOSES.has(purpose) && purpose !== "asset") throw fail("unsupported", "Choose an image file.");
     if (file.size > 20 * 1048576) throw fail("too_large", `${file.name} is larger than 20 MB.`);
     let blob = file, width, height;
     if (image && !gif && rule.square) ({ blob, width, height } = await resizeImage(file, rule));
@@ -239,7 +239,11 @@ async function storeFile(file, purpose) {
     const up = await BB.upload(blob);
     return { url: up.url, name: file.name, type: blob.type || file.type, size: up.sizeBytes || blob.size, width, height };
   }
-  if (!image) throw fail("unsupported", `${file.name}: only images and GIFs can be shared in this version.`);
+  if (image && file.size > 15 * 1048576) throw fail("too_large", `${file.name} is larger than 15 MB.`);
+  if (!image) {
+    if (!MEDIA_PURPOSES.has(purpose)) throw fail("unsupported", "Choose an image file.");
+    return storeChunked(file, pid);
+  }
   if (gif && !rule.square && purpose !== "thumbnail") {
     if (file.size > 600 * 1024) throw fail("too_large", `${file.name} is over 600 KB. Use a smaller GIF.`);
     const { width, height } = await imageSize(file);
@@ -256,11 +260,94 @@ async function storeFile(file, purpose) {
   }
 }
 
+// Videos, voice messages and other files. Firebase (without paid Storage) keeps them in the project's
+// `files` collection, split into chunks of raw bytes under 1 MB; the stored URL is bbfile:<project>/<id>.
+// The Artifact edition uploads them like images (above).
+const MEDIA_PURPOSES = new Set(["chat", "feedback", "bug", "doc", "comment"]);
+const MEDIA_MAX = { video: 25, audio: 10, other: 10 }; // MB, Firebase edition
+const mediaKind = (type) => (/^video\//.test(type || "") ? "video" : /^audio\//.test(type || "") ? "audio" : isImageType(type) ? "image" : "other");
+const CHUNK_BYTES = 900 * 1024;
+async function storeChunked(file, pid = currentId) {
+  const kind = mediaKind(file.type);
+  const max = MEDIA_MAX[kind] || MEDIA_MAX.other;
+  if (file.size > max * 1048576) throw fail("too_large", `${file.name} is larger than ${max} MB.`);
+  const n = Math.max(1, Math.ceil(file.size / CHUNK_BYTES));
+  const ref = projectsCol().doc(pid).collection("files").doc();
+  await ref.set({ uid: user.uid, name: String(file.name || "file").slice(0, 120), type: file.type || "application/octet-stream", size: file.size, chunks: n, at: Date.now() });
+  await mapLimit([...Array(n).keys()], 4, async (i) => {
+    const bytes = new Uint8Array(await file.slice(i * CHUNK_BYTES, (i + 1) * CHUNK_BYTES).arrayBuffer());
+    await ref.collection("chunks").doc(String(i)).set({ i, data: firebase.firestore.Blob.fromUint8Array(bytes) });
+  });
+  const out = { url: `bbfile:${pid}/${ref.id}`, name: file.name, type: file.type || "application/octet-stream", size: file.size };
+  if (kind === "video") Object.assign(out, await videoInfo(file));
+  return out;
+}
+// Width, height and duration of a video file, read locally before upload.
+function videoInfo(file) {
+  return new Promise((resolve) => {
+    const v = document.createElement("video");
+    const url = URL.createObjectURL(file);
+    const done = (info) => { URL.revokeObjectURL(url); resolve(info); };
+    v.preload = "metadata";
+    v.onloadedmetadata = () => done({ width: v.videoWidth || 0, height: v.videoHeight || 0, duration: Number.isFinite(v.duration) ? Math.round(v.duration * 10) / 10 : 0 });
+    v.onerror = () => done({});
+    setTimeout(() => done({}), 4000);
+    v.src = url;
+  });
+}
+const isStoredFile = (u) => /^bbfile:[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$/.test(String(u || ""));
+const mediaUrls = new Map();   // bbfile url -> local object URL once loaded
+const mediaFailed = new Set();
+const mediaLoading = new Set();
+async function loadStoredFile(u) {
+  const [pid, id] = u.slice(7).split("/");
+  const ref = projectsCol().doc(pid).collection("files").doc(id);
+  const meta = await ref.get();
+  if (!meta.exists) throw fail("not-found", "This file was deleted.");
+  const snap = await ref.collection("chunks").get();
+  const parts = snap.docs.map((d) => d.data()).sort((a, b) => a.i - b.i).map((c) => c.data.toUint8Array());
+  return URL.createObjectURL(new Blob(parts, { type: meta.data().type }));
+}
+// URL to put in src for any stored file. Chunked files load in the background, then the page re-renders.
+function mediaSrc(u) {
+  if (!isStoredFile(u)) return safeUrl(u);
+  if (mediaUrls.has(u)) return mediaUrls.get(u);
+  if (!mediaLoading.has(u) && !mediaFailed.has(u)) {
+    mediaLoading.add(u);
+    loadStoredFile(u).then((url) => mediaUrls.set(u, url))
+      .catch((e) => { console.error("BLACKBOX: file load", u, e); mediaFailed.add(u); })
+      .finally(() => { mediaLoading.delete(u); scheduleRender(); });
+  }
+  return "";
+}
+const msrc = (u) => esc(mediaSrc(u));
+const mediaState = (u) => (mediaSrc(u) ? "ready" : mediaFailed.has(u) ? "failed" : "loading");
+async function resolveMedia(u) {
+  if (!isStoredFile(u)) return safeUrl(u);
+  if (!mediaUrls.has(u)) mediaUrls.set(u, await loadStoredFile(u));
+  return mediaUrls.get(u);
+}
+const fmtDuration = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+
 /* ---------- Data layer ---------- */
 const projectsCol = () => db.collection("projects");
 const sub = (name) => projectsCol().doc(currentId).collection(name);
 const updateProject = (data) => projectsCol().doc(currentId).update(data);
 const FV = () => firebase.firestore.FieldValue;
+
+/* ---------- Modules ---------- */
+// Feature files (feedback.js, analytics.js, bugs.js, search.js, chat.js…) plug in here instead of
+// editing the core: their pages, project listeners, file drop targets and data to delete.
+const MODULE_VIEWS = {};            // route name -> () => html
+const PROJECT_HOOKS = [];           // fn(projectId) when a project opens; may return unsubscribe function(s)
+const PROJECT_RESETS = [];          // fn() clearing a module's state when switching projects
+const PROJECT_SUBCOLLECTIONS = [];  // extra subcollection names deleted with a project
+const PROJECT_CLEANUPS = [];        // async fn(projectRef) deleting nested data before a project goes
+const FILE_TARGETS = {};            // drop/pick target -> fn(files, opts); permission in FILE_TARGET_PERMS
+const FILE_TARGET_PERMS = {};       // target -> "chat" | "edit" | "manage" (default "edit")
+const registerView = (name, fn) => { MODULE_VIEWS[name] = fn; };
+const onProject = (fn) => PROJECT_HOOKS.push(fn);
+const onProjectReset = (fn) => PROJECT_RESETS.push(fn);
 
 // Activity types: icon, color and filter group, like an audit log.
 const ACT_TYPES = {
@@ -471,7 +558,7 @@ function selectProject(id) {
   unsubMessages = null;
   channelLatest = {};
   outbox = outbox.filter((o) => projects[o.pid]); // unsent messages of other projects wait for their return
-  editingUpdate = null; updateCoverDraft = null; assetFolder = "";
+  assetFolder = "";
   tasks = []; activity = []; messages = []; items = []; assets = []; updates = [];
   taskFilter = { status: "all", owner: "all" };
   activityFilter = { type: "all", who: "all" };
@@ -480,6 +567,7 @@ function selectProject(id) {
   activityLimit = 100;
   chatPending = []; editingMsg = null;
   clearAllDrafts(); // unsaved text belongs to the project it was typed in
+  PROJECT_RESETS.forEach((fn) => fn());
   currentId = id;
   subscribedId = id;
   if (id) storeSet("blackbox:project", id);
@@ -499,6 +587,7 @@ function selectProject(id) {
       scheduleRender();
     }),
   ];
+  for (const hook of PROJECT_HOOKS) unsubCurrent.push(...[].concat(hook(id) || []).filter((u) => typeof u === "function"));
   listenActivity();
   listenUpdates();
   listenChannel(route().name === "chat" && channelsOf().some((c) => c.id === route().arg) ? route().arg : "general");
@@ -554,7 +643,13 @@ async function createProject(name) {
 
 async function deleteProjectData(id) {
   const ref = projectsCol().doc(id);
-  const cols = ["tasks", "activity", "messages", "items", "assets", "updates", "notifications"].map((n) => ref.collection(n));
+  for (const fn of PROJECT_CLEANUPS) await fn(ref);
+  // Chunks of stored files first: they live under each file.
+  for (const f of (await ref.collection("files").get()).docs) {
+    const chunks = await f.ref.collection("chunks").get();
+    for (const c of chunks.docs) await c.ref.delete();
+  }
+  const cols = ["tasks", "activity", "messages", "items", "assets", "updates", "notifications", "files", ...PROJECT_SUBCOLLECTIONS].map((n) => ref.collection(n));
   for (const c of channelsOf(projects[id])) if (c.id !== "general") cols.push(ref.collection("channels").doc(c.id).collection("messages"));
   for (const col of cols) {
     const snap = await col.get();
@@ -569,13 +664,15 @@ async function deleteProjectData(id) {
 
 /* ---------- Shared fragments ---------- */
 const priorityPill = (p) => `<span class="pill p-${esc(p)}">${icon(PRIORITY[p]?.icon || "minus", 16, 2)}${PRIORITY[p]?.label || esc(p)}</span>`;
-const statusPill = (s) => `<span class="pill s-${esc(s)}">${icon(STATUS[s]?.icon || "circle", 16, 2)}${STATUS[s]?.label || esc(s)}</span>`;
+// Bugs show the same status keys as Open / In progress / To test / Resolved (bugs.js).
+const statusLabel = (s, type) => (type === "bug" && typeof bugStatusLabel === "function" ? bugStatusLabel(s) : STATUS[s]?.label || s);
+const statusPill = (s, type) => `<span class="pill s-${esc(s)}">${icon(STATUS[s]?.icon || "circle", 16, 2)}${esc(statusLabel(s, type))}</span>`;
 
 function taskRow(t, key) {
   return `<tr data-task="${esc(t.id)}" class="${t.status === "done" ? "task-done" : ""}">
-    <td><div class="task-cell">${icon(t.type === "bug" ? "bug" : "file", 22, 1.6)}<div class="task-text"><div class="task-title">${esc(t.title)}</div>${t.desc ? `<div class="task-desc">${esc(t.desc)}</div>` : ""}</div></div></td>
+    <td><div class="task-cell">${icon(t.type === "bug" ? "bug" : "file", 22, 1.6)}<div class="task-text"><div class="task-title">${esc(t.title)}</div>${t.type === "bug" && typeof bugRowMeta === "function" ? bugRowMeta(t) : ""}${t.desc ? `<div class="task-desc">${esc(t.desc)}</div>` : ""}</div></div></td>
     <td>${priorityPill(t.priority)}</td>
-    <td>${statusPill(t.status)}</td>
+    <td>${statusPill(t.status, t.type)}</td>
     <td>${t.owner ? `<div class="owner">${avatar(t.owner, 36)}<span class="ellipsis">${esc(memberName(t.owner))}</span></div>` : '<span class="muted">Unassigned</span>'}</td>
     <td class="menu-cell"><button class="icon-btn bare" data-task-menu="${esc(t.id)}" data-list="${key}" data-menu-key="task:${key}:${esc(t.id)}" aria-haspopup="menu" aria-expanded="false" title="Actions">${icon("dots", 20)}</button></td>
   </tr>`;
@@ -710,7 +807,7 @@ function viewTaskList(type) {
   return `${header(type === "bug" ? "Bugs" : "Tasks")}
     <section class="card ${board ? "board-card" : ""}">
       <div class="card-head wrap">
-        ${board ? "" : `<div class="filters">${chip("status", "all", "All")}${Object.entries(STATUS).map(([k, v]) => chip("status", k, v.label)).join("")}</div>`}
+        ${board ? "" : `<div class="filters">${chip("status", "all", "All")}${Object.keys(STATUS).map((k) => chip("status", k, statusLabel(k, type))).join("")}</div>`}
         <div class="filters">${chip("owner", "all", "Everyone")}${p.memberIds.map((id) => chip("owner", id, memberName(id))).join("")}</div>
         ${seg}
       </div>
@@ -780,16 +877,17 @@ function viewChat() {
   };
   for (const m of messages) {
     const mine = m.uid === myUid;
-    const actions = `<div class="msg-actions">${mine ? `<button class="icon-btn bare" data-edit-msg="${esc(m.id)}" title="Edit">${icon("edit", 15)}</button>` : ""}${mine || can("manage") ? `<button class="icon-btn bare danger-text" data-delete-msg="${esc(m.id)}" title="Delete">${icon("trash", 15)}</button>` : ""}</div>`;
+    const actions = `<div class="msg-actions">${chatMsgActions(m)}${mine ? `<button class="icon-btn bare" data-edit-msg="${esc(m.id)}" title="Edit">${icon("edit", 15)}</button>` : ""}${mine || can("manage") ? `<button class="icon-btn bare danger-text" data-delete-msg="${esc(m.id)}" title="Delete">${icon("trash", 15)}</button>` : ""}</div>`;
     const body = editingMsg === m.id
       ? `<form class="msg-edit" data-form="edit-msg" data-msg="${esc(m.id)}" data-drafts><textarea id="msg-edit-text" rows="2" maxlength="2000">${esc(detokenizeMentions(m.text))}</textarea><div class="muted small">Enter to save · Esc to cancel</div></form>`
-      : `${m.text ? `<div class="msg-text">${formatMessage(m.text, { mention: renderMention })}${m.editedAt ? ' <span class="edited">(edited)</span>' : ""}</div>` : ""}${attachmentsHtml(m.attachments)}`;
-    row(m, body, mentionedIds(m.text).includes(myUid) ? "mentioned" : "", actions);
+      : `${pinnedMark(m)}${m.text ? `<div class="msg-text">${formatMessage(m.text, { mention: renderMention })}${m.editedAt ? ' <span class="edited">(edited)</span>' : ""}</div>` : ""}${attachmentsHtml(m.attachments)}${reactionsHtml(m)}`;
+    row(m, body, [mentionedIds(m.text).includes(myUid) && "mentioned", m.pinned && "pinned", flashMsg === m.id && "flash"].filter(Boolean).join(" "), actions);
   }
   // Messages still being sent show right away, with local previews.
   for (const o of outbox.filter((x) => x.pid === currentId && x.channel === ch.id && !x.hidden)) {
     const previews = o.files.length ? `<div class="atts ${o.files.length > 1 ? "multi" : ""}">${o.files.map((f) => f.preview
-      ? `<div class="att-wrap"><span class="att-img sending"><img src="${esc(f.preview)}" alt=""></span></div>`
+      ? `<div class="att-wrap"><span class="att-img sending">${f.kind === "video" ? `<video src="${esc(f.preview)}" muted playsinline preload="metadata"></video>` : `<img src="${esc(f.preview)}" alt="">`}</span></div>`
+      : f.kind === "audio" && f.extra ? `<span class="att-file">${icon("mic", 22)}<span><b class="ellipsis">Voice message</b><span class="muted small">${fmtDuration(f.extra.duration)}</span></span></span>`
       : `<span class="att-file">${icon("file", 22)}<span><b class="ellipsis">${esc(f.file.name)}</b><span class="muted small">${formatSize(f.file.size)}</span></span></span>`).join("")}</div>` : "";
     const status = o.state === "failed"
       ? `<div class="send-failed">${icon("cloudOff", 14)}<span>Couldn't send: ${esc(o.error || "")}</span><button class="link small" data-outbox-retry="${esc(o.id)}">Retry</button><button class="link small danger-text" data-outbox-discard="${esc(o.id)}">Discard</button></div>`
@@ -808,11 +906,14 @@ function viewChat() {
       <section class="card chat-card" data-drop="chat">
         <div class="drop-hint">${icon("upload", 28)}<span>Drop files to add them to your message</span></div>
         <div class="chan-head">${icon("hash", 20)}<b>${esc(ch.name)}</b>${ch.topic ? `<span class="chan-topic ellipsis">${esc(ch.topic)}</span>` : ""}<span class="spacer"></span>
+          ${pinsButton()}
           ${can("manage") ? `<button class="icon-btn bare" data-chan-menu="${esc(ch.id)}" data-menu-key="chan:${esc(ch.id)}" aria-haspopup="menu" title="Channel settings">${icon("dots", 18)}</button>` : ""}</div>
+        ${pinsPanel()}
         <button type="button" class="jump-latest ${chatNewBelow ? "show" : ""}" data-action="jump-latest">${icon("arrowDown", 15)}New messages</button>
         <div class="chat" id="chat-log">${html || `<div class="chat-empty">${icon("hash", 34)}<h3>Welcome to #${esc(ch.name)}</h3><p class="muted">${ch.id === "general" ? `This is the start of ${esc(p.name)}'s team chat.` : "This is the start of the channel."} Say hi, share screenshots, drop GIFs, type @ to mention someone.</p></div>`}</div>
+        ${typingHtml()}
         <form class="composer" data-form="chat" data-drafts>
-          ${chatPending.length ? `<div class="pending">${chatPending.map((f) => `<div class="pend">${f.preview ? `<img src="${esc(f.preview)}" alt="">` : `<span class="pend-file">${icon("file", 22)}</span>`}<span class="pend-name ellipsis">${esc(f.file.name)}</span><button type="button" class="icon-btn bare tiny" data-remove-pending="${esc(f.id)}" title="Remove">${icon("x", 13)}</button></div>`).join("")}</div>` : ""}
+          ${chatPending.length ? `<div class="pending">${chatPending.map((f) => `<div class="pend">${f.kind === "video" ? `<video src="${esc(f.preview)}" muted playsinline preload="metadata"></video>` : f.preview ? `<img src="${esc(f.preview)}" alt="">` : `<span class="pend-file">${icon(f.kind === "audio" ? "mic" : "file", 22)}</span>`}<span class="pend-name ellipsis">${esc(f.file.name)}</span><button type="button" class="icon-btn bare tiny" data-remove-pending="${esc(f.id)}" title="Remove">${icon("x", 13)}</button></div>`).join("")}</div>` : ""}
           <div class="fmt-bar">
             <button type="button" class="icon-btn bare" data-fmt="**" title="Bold (Ctrl+B)">${icon("bold", 16, 2.2)}</button>
             <button type="button" class="icon-btn bare" data-fmt="*" title="Italic (Ctrl+I)">${icon("italic", 16, 2)}</button>
@@ -822,8 +923,8 @@ function viewChat() {
             <button type="button" class="icon-btn bare" data-fmt="@" title="Mention someone">${icon("at", 16, 2)}</button>
             <span class="muted small fmt-hint">**bold** *italic* ~~strike~~ \`code\` @name</span>
           </div>
-          <div class="composer-row">
-            <button type="button" class="icon-btn bare round-sm" data-pick="chat" title="Attach files">${icon("paperclip", 19)}</button>
+          ${voiceComposer() || `<div class="composer-row">
+            <button type="button" class="icon-btn bare round-sm" data-pick="chat" title="Attach files (images, videos, files)">${icon("paperclip", 19)}</button>
             <textarea id="chat-text" name="text" rows="1" placeholder="Message #${esc(ch.name)}" maxlength="2000" autocomplete="off"></textarea>
             <div class="gif-wrap">
               <button type="button" class="icon-btn bare round-sm ${gifOpen ? "on" : ""}" data-action="toggle-gifs" title="GIFs">${icon("gif", 21)}</button>
@@ -832,19 +933,41 @@ function viewChat() {
                 ${gifs.length ? `<div class="gif-grid">${gifs.map((g) => `<button type="button" class="gif-pick" data-send-gif="${esc(g.id)}" title="${esc(g.name)}"><img src="${src(g.url)}" alt="${esc(g.name)}" loading="lazy"></button>`).join("")}</div>` : '<p class="muted small">No GIFs yet. Upload one and it stays here for the whole team.</p>'}
               </div>` : ""}
             </div>
+            ${voiceButton()}
             <button class="btn primary send-btn" title="Send">${icon("send", 18)}</button>
-          </div>
+          </div>`}
         </form>
       </section>
       <aside class="card chat-members">
-        <div class="side-label">Members · ${p.memberIds.length}</div>
-        <ul>${p.memberIds.map((id) => `<li>${avatar(id, 32)}<div class="who"><div class="name ellipsis">${esc(memberName(id))}</div><div class="sub ellipsis">${esc(profiles[id]?.title || ROLES[roleOf(id)].label)}</div></div></li>`).join("")}</ul>
+        ${membersHtml(p)}
       </aside>
     </div>`;
 }
+// Voice message player: play/pause, waveform with progress (click to seek), duration.
+function voiceHtml(a) {
+  const url = mediaSrc(a.url);
+  const peaks = Array.isArray(a.peaks) && a.peaks.length ? a.peaks : Array.from({ length: 36 }, (_, i) => 3 + (hash(`${a.url}${i}`) % 6));
+  return `<div class="voice" data-voice data-keep="voice:${esc(a.url)}:${mediaState(a.url)}">
+    <button type="button" class="voice-play" data-voice-play title="Play" ${url ? "" : "disabled"}>${url ? icon("play", 16) : mediaFailed.has(a.url) ? icon("alert", 16) : icon("spinner", 16)}</button>
+    <div class="voice-wave" data-voice-seek>${peaks.slice(0, 48).map((p) => `<i style="height:${Math.max(18, Math.min(100, Math.round(+p * 11)))}%"></i>`).join("")}</div>
+    <span class="voice-time" data-total="${esc(fmtDuration(a.duration))}" data-dur="${+a.duration || 0}">${esc(fmtDuration(a.duration))}</span>
+    ${url ? `<audio preload="metadata" src="${esc(url)}"></audio>` : ""}
+  </div>`;
+}
+function videoHtml(a) {
+  const url = mediaSrc(a.url);
+  const ratio = a.width && a.height ? `aspect-ratio:${a.width}/${a.height}` : "aspect-ratio:16/9";
+  return `<div class="att-wrap att-video-wrap" data-keep="video:${esc(a.url)}:${mediaState(a.url)}"><div class="att-video" style="${ratio}">${url
+    ? `<video controls preload="metadata" playsinline src="${esc(url)}"></video>`
+    : `<div class="media-wait">${mediaFailed.has(a.url) ? `${icon("alert", 20)}<span>Video unavailable</span>` : `${icon("spinner", 20)}<span>Loading video…</span>`}</div>`}</div>
+    ${url ? `<button type="button" class="att-dl" data-download="${esc(a.url)}" data-name="${esc(a.name)}" title="Download">${icon("download", 16)}</button>` : ""}</div>`;
+}
 function attachmentsHtml(list) {
   if (!list?.length) return "";
-  return `<div class="atts ${list.length > 1 ? "multi" : ""}">${list.map((a) => isImageType(a.type) && safeUrl(a.url)
+  return `<div class="atts ${list.length > 1 ? "multi" : ""}">${list.map((a) => mediaKind(a.type) === "audio" ? voiceHtml(a)
+    : mediaKind(a.type) === "video" ? videoHtml(a)
+    : isStoredFile(a.url) ? `<button type="button" class="att-file" data-download="${esc(a.url)}" data-name="${esc(a.name)}">${icon("file", 22)}<span><b class="ellipsis">${esc(a.name)}</b><span class="muted small">${formatSize(a.size)}</span></span>${icon("download", 16)}</button>`
+    : isImageType(a.type) && safeUrl(a.url)
     ? `<div class="att-wrap"><button type="button" class="att-img" data-lightbox="${src(a.url)}" data-caption="${esc(a.name)}"><img src="${src(a.url)}" alt="${esc(a.name)}" loading="lazy" decoding="async" ${a.width ? `width="${a.width}" height="${a.height}"` : ""}></button>
        <button type="button" class="att-dl" data-download="${src(a.url)}" data-name="${esc(a.name)}" title="Download">${icon("download", 16)}</button></div>`
     : `<${safeUrl(a.url) ? `a href="${src(a.url)}" target="_blank" rel="noopener"` : "span"} class="att-file">${icon("file", 22)}<span><b class="ellipsis">${esc(a.name)}</b><span class="muted small">${formatSize(a.size)}</span></span></${safeUrl(a.url) ? "a" : "span"}>`).join("")}</div>`;
@@ -964,8 +1087,8 @@ function viewTeam() {
         <ul class="people">${p.memberIds.map((id) => {
           const role = roleOf(id);
           const editable = manage && role !== "owner" && id !== user.uid;
-          return `<li>${avatar(id, 44)}
-          <div class="who"><div class="name">${esc(memberName(id))}${id === user.uid ? ' <span class="muted">(you)</span>' : ""}</div><div class="sub">${esc([profiles[id]?.title, memberEmail(id)].filter(Boolean).join(" · "))}</div></div>
+          return `<li>${avatarP(id, 44)}
+          <div class="who"><div class="name">${esc(memberName(id))}${id === user.uid ? ' <span class="muted">(you)</span>' : ""}</div><div class="sub"><span class="pres-text pres-${presenceOf(id)}">${PRESENCE_LABEL[presenceOf(id)]}</span>${esc([profiles[id]?.title, memberEmail(id)].filter(Boolean).map((x) => ` · ${x}`).join(""))}</div></div>
           ${editable
             ? `<select id="role-${esc(id)}" class="role-select" data-role-for="${esc(id)}" aria-label="Role of ${esc(memberName(id))}">${["admin", "member", "viewer"].map((r) => `<option value="${r}" ${r === role ? "selected" : ""}>${ROLES[r].label}</option>`).join("")}</select>`
             : `<span class="role-tag role-${role}">${icon(role === "owner" ? "star" : role === "admin" ? "shield" : role === "viewer" ? "eye" : "user", 13)}${ROLES[role].label}</span>`}
@@ -1033,6 +1156,7 @@ function viewProjectSettings() {
             <div class="row-gap spaced-sm">${assetChooser("thumbnail")}${p.thumbnail ? '<button class="btn ghost small" data-action="remove-thumbnail">Remove</button>' : ""}</div>
           </div>
         </section>
+        ${typeof revenueSettingsCard === "function" ? revenueSettingsCard() : ""}
         <section class="card">
           <div class="card-head"><h2>${isOwner() ? "Delete project" : "Leave project"}</h2></div>
           <div class="card-body">
@@ -1192,13 +1316,18 @@ function patch(el, html) {
       callbacks: {
         // The field being typed in keeps its text and caret; everything else updates.
         beforeNodeMorphed: (oldNode, newNode) => {
+          // An element with data-keep="<key>" is left alone (with its children) while its key is unchanged:
+          // media players and the document editor keep their live state.
+          if (oldNode.nodeType === 1 && oldNode.dataset?.keep && newNode.nodeType === 1 && newNode.dataset?.keep === oldNode.dataset.keep) return false;
           if (oldNode === document.activeElement && (oldNode.tagName === "INPUT" || oldNode.tagName === "TEXTAREA") && newNode.nodeType === 1) {
             if (oldNode.tagName === "TEXTAREA") newNode.textContent = oldNode.value; else newNode.setAttribute("value", oldNode.value);
           }
           return true;
         },
         // An image that already loaded keeps its "loaded" state instead of fading in again.
-        beforeAttributeUpdated: (name, node) => !(name === "class" && node.tagName === "IMG" && node.classList.contains("loaded")),
+        // Elements marked data-live (media players) keep the classes and styles their scripts set.
+        beforeAttributeUpdated: (name, node) => !(name === "class" && node.tagName === "IMG" && node.classList.contains("loaded"))
+          && !((name === "class" || name === "style") && node.hasAttribute?.("data-live")),
       },
     });
   }
@@ -1244,7 +1373,7 @@ function render() {
   const entering = routeKey !== lastRoute;
   lastRoute = routeKey;
   view.className = `panel view-${r.name}${entering && !viewTransition ? " view-enter" : ""}`;
-  const html = r.name === "profile" ? viewProfile() : project() ? (views[r.name] || viewOverview)() : viewWelcome();
+  const html = r.name === "profile" ? viewProfile() : project() ? (MODULE_VIEWS[r.name] || views[r.name] || viewOverview)() : viewWelcome();
   // A new page is drawn fresh; the same page is patched.
   if (entering) view.innerHTML = html; else patch(view, html);
   restoreDrafts(view);
@@ -1333,6 +1462,7 @@ function openTask(id, defaults = {}) {
   $("#task-owner").innerHTML = '<option value="">Unassigned</option>' + p.memberIds.map((m) => `<option value="${esc(m)}">${esc(memberName(m))}</option>`).join("");
   const v = t || { title: "", desc: "", type: "task", priority: "medium", status: "todo", owner: user.uid, ...defaults };
   for (const k of ["title", "desc", "type", "priority", "status", "owner"]) taskForm.elements[k].value = v[k] || "";
+  if (typeof bugFormOpen === "function") bugFormOpen(t, v, ro); // bug fields, labels and attachments (bugs.js)
   refreshSelects(taskForm);
   taskDialog.showModal();
   taskForm.elements.title.focus();
@@ -1340,13 +1470,15 @@ function openTask(id, defaults = {}) {
 
 function taskChanges(before, after) {
   const out = [];
-  const label = { status: (v) => STATUS[v]?.label, priority: (v) => PRIORITY[v]?.label, owner: (v) => (v ? memberName(v) : "Unassigned"), type: (v) => (v === "bug" ? "Bug" : "Task") };
+  const kind = after.type || before.type;
+  const label = { status: (v) => statusLabel(v, kind), priority: (v) => PRIORITY[v]?.label, owner: (v) => (v ? memberName(v) : "Unassigned"), type: (v) => (v === "bug" ? "Bug" : "Task") };
   const names = { title: "Title", desc: "Description", status: "Status", priority: "Priority", owner: "Owner", type: "Type" };
   for (const k of Object.keys(names)) {
     if ((before[k] || "") === (after[k] || "")) continue;
     const f = label[k] || ((v) => v);
     out.push({ field: names[k], from: f(before[k]) || "", to: f(after[k]) || "" });
   }
+  if (typeof bugChanges === "function") out.push(...bugChanges(before, after));
   return out;
 }
 
@@ -1356,24 +1488,28 @@ taskForm.addEventListener("submit", async (e) => {
   data.title = data.title.trim();
   data.desc = data.desc.trim();
   if (!data.title) return;
+  const editId = editingId;
+  // Bug fields and attachments (uploads stay in the dialog until they're done) — bugs.js.
+  if (typeof bugFormData === "function" && !(await bugFormData(data, editId))) return;
   taskDialog.close();
   const where = data.type === "bug" ? "Bugs" : "Tasks";
-  if (editingId) {
-    const before = tasks.find((x) => x.id === editingId) || {};
+  if (editId) {
+    const before = tasks.find((x) => x.id === editId) || {};
     const changes = taskChanges(before, data);
     if (!changes.length) return;
-    if (await act(() => sub("tasks").doc(editingId).update({ ...data, updatedAt: Date.now() }))) {
+    if (await act(() => sub("tasks").doc(editId).update({ ...data, updatedAt: Date.now() }))) {
       const completed = before.status !== "done" && data.status === "done";
       const type = data.type === "bug" ? (completed ? "bug.fixed" : "bug.update") : (completed ? "task.complete" : "task.update");
-      log(type, completed ? (data.type === "bug" ? "fixed" : "completed") : "updated", data.title, where, { changes });
-      if (data.owner && data.owner !== before.owner) notify(data.owner, "assign", data.title, data.type === "bug" ? "#bugs" : "#tasks");
+      log(type, completed ? (data.type === "bug" ? "fixed" : "completed") : "updated", data.title, where, { changes, ref: `task:${editId}` });
+      if (data.owner && data.owner !== before.owner) notify(data.owner, "assign", data.title, data.type === "bug" ? `#bugs.${editId}` : "#tasks");
     }
   } else {
     const order = Math.max(0, ...tasks.map((t) => t.order ?? 0)) + 1;
-    if (await act(() => sub("tasks").add({ ...data, order, createdBy: user.uid, createdAt: Date.now() }))) {
-      if (data.type === "bug") log("bug.report", "reported a new bug", "", "Bugs", { detail: data.title });
-      else log("task.create", "created", data.title, "Tasks");
-      if (data.owner) notify(data.owner, "assign", data.title, data.type === "bug" ? "#bugs" : "#tasks");
+    const ref = await act(() => sub("tasks").add({ ...data, order, createdBy: user.uid, createdAt: Date.now() }));
+    if (ref) {
+      if (data.type === "bug") log("bug.report", "reported a new bug", "", "Bugs", { detail: data.title, ref: `task:${ref.id}` });
+      else log("task.create", "created", data.title, "Tasks", { ref: `task:${ref.id}` });
+      if (data.owner) notify(data.owner, "assign", data.title, data.type === "bug" ? `#bugs.${ref.id}` : "#tasks");
     }
   }
 });
@@ -1551,8 +1687,10 @@ function autoGrow(el) {
 function addChatFiles(files) {
   for (const file of files) {
     if (chatPending.length >= 10) { toast("You can attach up to 10 files per message.", true); break; }
-    if (!ARTIFACT && !isImageType(file.type)) { toast(`${file.name}: only images and GIFs can be shared in this version.`, true); continue; }
-    chatPending.push({ id: Math.random().toString(36).slice(2), file, preview: isImageType(file.type) ? URL.createObjectURL(file) : "" });
+    const kind = mediaKind(file.type);
+    const max = ARTIFACT ? 20 : kind === "image" ? 15 : MEDIA_MAX[kind];
+    if (file.size > max * 1048576) { toast(`${file.name} is larger than ${max} MB.`, true); continue; }
+    chatPending.push({ id: Math.random().toString(36).slice(2), file, kind, preview: kind === "image" || kind === "video" ? URL.createObjectURL(file) : "" });
   }
   render();
   $("#chat-text")?.focus();
@@ -1607,6 +1745,7 @@ function sendChat() {
   outbox.push(entry);
   chatPending = [];
   box.value = "";
+  stopTyping();
   delete drafts["chat-text"];
   closeMentionPicker();
   render();
@@ -1625,7 +1764,7 @@ async function processOutbox(entry) {
   const msgs = entry.channel === "general" ? col.collection("messages") : col.collection("channels").doc(entry.channel).collection("messages");
   const ok = await act(async () => {
     // Files are prepared in parallel; already prepared ones are reused on retry.
-    await mapLimit(entry.files.filter((f) => !f.att), 3, async (f) => { f.att = await storeFile(f.file, "chat"); });
+    await mapLimit(entry.files.filter((f) => !f.att), 3, async (f) => { f.att = { ...(await storeFile(f.file, "chat", entry.pid)), ...(f.extra || {}) }; });
     const chunks = chunkAttachments(entry.files.map((f) => f.att));
     for (let i = entry.posted; i < chunks.length; i++) {
       const pending = msgs.add({ uid: m.uid, name: storedName(), text: i === 0 ? entry.text : "", attachments: chunks[i], at: entry.at + i });
@@ -1739,14 +1878,14 @@ const ACTION_PERMS = {
 };
 
 // Downloads a file from the app. Artifact pages save through the viewer (it asks to confirm).
-const EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+const EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "video/mp4": "mp4", "video/webm": "webm", "video/quicktime": "mov", "audio/webm": "webm", "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "application/pdf": "pdf" };
 async function downloadFile(url, name = "image") {
-  const safe = safeUrl(url);
-  if (!safe) return;
   try {
+    const safe = await resolveMedia(url);
+    if (!safe) return;
     const blob = await (await fetch(safe)).blob();
-    const ext = EXT[blob.type] || (name.match(/\.(png|jpe?g|gif|webp)$/i)?.[1] ?? "png");
-    const filename = /\.[a-z0-9]{2,4}$/i.test(name) && EXT[blob.type] && name.toLowerCase().endsWith(ext) ? name : `${name.replace(/\.[^.]+$/, "")}.${ext}`;
+    const ext = EXT[blob.type.split(";")[0]] || (name.match(/\.([a-z0-9]{2,5})$/i)?.[1] ?? "png");
+    const filename = /\.[a-z0-9]{2,4}$/i.test(name) && name.toLowerCase().endsWith(ext) ? name : `${name.replace(/\.[^.]+$/, "")}.${ext}`;
     if (ARTIFACT) return await BB.download(blob, filename);
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -1879,17 +2018,7 @@ const actions = {
     while (foldersOf().some((f) => f.id === id)) id += "-2";
     if (await act(() => updateProject({ assetFolders: [...foldersOf(), { id, name }] }), "Folder created")) log("folder.create", "created folder", name, "Assets");
   },
-  "new-update": () => { editingUpdate = "new"; updateCoverDraft = null; clearAllDrafts(); location.hash = "#updates"; render(); },
-  "edit-update": (el) => { editingUpdate = el.dataset.update; updateCoverDraft = null; clearAllDrafts(); render(); },
-  "cancel-update": () => { editingUpdate = null; updateCoverDraft = null; clearAllDrafts(); render(); },
-  "fill-update": () => fillUpdateFromWork(),
-  "publish-update": (el) => setUpdateStatus(el.dataset.update, "published"),
-  "unpublish-update": (el) => setUpdateStatus(el.dataset.update, "draft"),
-  "delete-update": async (el) => {
-    const u = updates.find((x) => x.id === el.dataset.update);
-    if (!u || !(await ask({ title: `Delete ${u.title}?`, text: "The patch notes are removed for everyone.", ok: "Delete", danger: true }))) return;
-    if (await act(() => sub("updates").doc(u.id).delete(), "Update deleted")) { log("update.delete", "deleted", u.title, "Updates"); location.hash = "#updates"; }
-  },
+  // Update actions (new/edit/publish/delete…) live in updates.js.
   "toggle-notifs": () => { notifOpen = !notifOpen; renderNotifPanel(); },
   "read-all": () => markAllRead(),
   "jump-latest": () => scrollChatDown(true),
@@ -1980,7 +2109,7 @@ document.addEventListener("click", async (e) => {
   if (d.outboxRetry) { const o = outbox.find((x) => x.id === d.outboxRetry); if (o) processOutbox(o); return; }
   if (d.outboxDiscard) { outbox = outbox.filter((x) => x.id !== d.outboxDiscard); return render(); }
   if (d.pick) {
-    const need = d.pick === "chat" ? "chat" : ["icon", "thumbnail", "update-cover"].includes(d.pick) ? "manage" : d.pick === "avatar" ? null : "edit";
+    const need = FILE_TARGETS[d.pick] ? FILE_TARGET_PERMS[d.pick] || "edit" : d.pick === "chat" ? "chat" : ["icon", "thumbnail", "update-cover"].includes(d.pick) ? "manage" : d.pick === "avatar" ? null : "edit";
     if (need && !can(need)) return toast("Your role in this project can't do that.", true);
     return pickFiles(el);
   }
@@ -1989,7 +2118,7 @@ document.addEventListener("click", async (e) => {
     return actions[d.action]?.(el);
   }
   if (d.lightbox) return openLightbox(d.lightbox, d.caption);
-  if (d.task) return openTask(d.task);
+  if (d.task) return tasks.find((x) => x.id === d.task)?.type === "bug" && typeof openBug === "function" ? openBug(d.task) : openTask(d.task);
   if (d.item) return openItem(null, d.item);
   if (d.filter) {
     const [k, v] = d.filter.split(":");
@@ -2086,7 +2215,7 @@ document.addEventListener("change", async (e) => {
 
 // One file picker for the whole app. It lives outside the re-rendered view, so a file chosen while
 // a teammate's change re-renders the page is never lost.
-const PICK_ACCEPT = { chat: () => (ARTIFACT ? "" : "image/*"), asset: () => (ARTIFACT ? "" : "image/*"), gif: () => "image/gif" };
+const PICK_ACCEPT = { chat: () => "", asset: () => (ARTIFACT ? "" : "image/*"), gif: () => "image/gif" };
 const PICK_MULTI = new Set(["chat", "asset", "items"]);
 let pickTarget = null;
 function pickFiles(el) {
@@ -2095,7 +2224,7 @@ function pickFiles(el) {
   input.accept = (PICK_ACCEPT[target] || (() => "image/*"))();
   input.multiple = PICK_MULTI.has(target);
   input.value = "";
-  pickTarget = { target, collection: el.dataset.collection };
+  pickTarget = { target, collection: el.dataset.collection, el };
   input.click();
 }
 $("#file-picker").addEventListener("change", (e) => {
@@ -2107,14 +2236,10 @@ $("#file-picker").addEventListener("change", (e) => {
 // Files from the picker or a drop zone, by destination.
 async function handleFiles(target, files, opts = {}) {
   if (!user) return;
-  const need = target === "chat" ? "chat" : /icon|thumbnail|update-cover/.test(target) ? "manage" : target === "avatar" ? null : "edit";
+  const need = FILE_TARGETS[target] ? FILE_TARGET_PERMS[target] || "edit" : target === "chat" ? "chat" : /icon|thumbnail|update-cover/.test(target) ? "manage" : target === "avatar" ? null : "edit";
   if (need && !can(need)) return toast("Your role in this project can't do that.", true);
+  if (FILE_TARGETS[target]) return FILE_TARGETS[target](files, opts);
   if (target === "chat") return addChatFiles(files);
-  if (target === "update-cover") {
-    const up = await act(() => storeFile(files[0], "thumbnail"));
-    if (up) { updateCoverDraft = up.url; render(); }
-    return;
-  }
   if (target === "asset" || target === "assets") return uploadAssets(files, $("#asset-upload-kind")?.value || "image");
   if (target === "items") return addItemsFromFiles(opts.collection, files);
   if (target === "item-image") return setItemFile(files[0]);
@@ -2182,7 +2307,6 @@ document.addEventListener("submit", async (e) => {
   const type = f.dataset.form;
 
   if (type === "chat") return sendChat();
-  if (type === "update") return saveUpdate(f, e.submitter?.value || "draft");
   if (type === "edit-msg") return saveMessageEdit(f.dataset.msg, $("#msg-edit-text").value);
   if (type === "release-item" && can("edit")) {
     const label = val("label");
@@ -2242,7 +2366,7 @@ document.addEventListener("submit", async (e) => {
   }
 });
 
-setupDropZones((zone, files, el) => handleFiles(zone, files, { collection: el.dataset.collection }));
+setupDropZones((zone, files, el) => handleFiles(zone, files, { collection: el.dataset.collection, el }));
 
 $("#project-select").addEventListener("change", (e) => {
   selectProject(e.target.value);
@@ -2272,7 +2396,6 @@ window.addEventListener("hashchange", () => {
     editingMsg = null;
   }
   lastView = route().name;
-  if (route().name !== "updates") editingUpdate = null;
   closeMentionPicker();
   notifOpen = false;
   if (route().name === "chat" && project()) listenChannel(channelsOf().some((c) => c.id === route().arg) ? route().arg : "general");
@@ -2391,6 +2514,7 @@ function onAuth(u) {
   outbox = [];
   clearAllDrafts();
   unsubProjects = []; unsubCurrent = []; unsubActivity = null;
+  PROJECT_RESETS.forEach((fn) => fn());
   projects = {}; invites = []; profiles = {}; currentId = null; subscribedId = null;
   tasks = []; activity = []; messages = []; items = []; assets = [];
   user = null;

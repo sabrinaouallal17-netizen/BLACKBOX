@@ -7,16 +7,17 @@ function viewBoard(type, list) {
   const editable = can("edit");
   return `<div class="board" data-board-type="${type}">${Object.entries(STATUS).map(([status, s]) => {
     const col = list.filter((t) => t.status === status);
+    const label = statusLabel(status, type);
     lists[`col-${status}`] = col.map((t) => t.id);
     return `<section class="kcol" data-kcol="${status}">
-      <header class="kcol-head"><span class="pill s-${status}">${icon(s.icon, 14, 2)}${s.label}</span><span class="muted small">${col.length}</span><span class="spacer"></span>
-        ${editable ? `<button class="icon-btn bare" data-action="new-task" data-status="${status}" title="Add to ${s.label}">${icon("plus", 16)}</button>` : ""}</header>
+      <header class="kcol-head"><span class="pill s-${status}">${icon(s.icon, 14, 2)}${esc(label)}</span><span class="muted small">${col.length}</span><span class="spacer"></span>
+        ${editable ? `<button class="icon-btn bare" data-action="new-task" data-status="${status}" title="Add to ${esc(label)}">${icon("plus", 16)}</button>` : ""}</header>
       <div class="kcol-body">${col.map((t) => `<article class="kcard ${editable ? "draggable" : ""}" data-kcard="${esc(t.id)}" tabindex="0">
           <div class="kcard-top">${priorityPill(t.priority)}<span class="spacer"></span>
             <button class="icon-btn bare" data-task-menu="${esc(t.id)}" data-list="col-${status}" data-menu-key="task:col-${status}:${esc(t.id)}" aria-haspopup="menu" title="Actions">${icon("dots", 18)}</button></div>
           <div class="kcard-title">${esc(t.title)}</div>
           ${t.desc ? `<div class="kcard-desc">${esc(t.desc)}</div>` : ""}
-          <div class="kcard-foot">${t.type === "bug" ? `<span class="muted small kcard-kind">${icon("bug", 14)}Bug</span>` : ""}<span class="spacer"></span>${t.owner ? avatar(t.owner, 26) : '<span class="muted small">Unassigned</span>'}</div>
+          <div class="kcard-foot">${t.type === "bug" ? (typeof severityBadge === "function" && t.severity ? severityBadge(t.severity, true) : `<span class="muted small kcard-kind">${icon("bug", 14)}Bug</span>`) : ""}<span class="spacer"></span>${t.owner ? avatar(t.owner, 26) : '<span class="muted small">Unassigned</span>'}</div>
         </article>`).join("") || `<div class="kcol-empty">${editable ? "Drop cards here" : "Nothing here"}</div>`}</div>
     </section>`;
   }).join("")}</div>`;
@@ -48,7 +49,9 @@ document.addEventListener("pointercancel", () => cancelDrag());
 document.addEventListener("click", (e) => {
   if (suppressClick) { suppressClick = false; e.stopPropagation(); e.preventDefault(); return; }
   const card = e.target.closest("[data-kcard]");
-  if (card && !e.target.closest("button")) openTask(card.dataset.kcard);
+  if (!card || e.target.closest("button")) return;
+  const isBug = tasks.find((x) => x.id === card.dataset.kcard)?.type === "bug";
+  if (isBug && typeof openBug === "function") openBug(card.dataset.kcard); else openTask(card.dataset.kcard);
 }, true);
 
 function startDrag(x, y) {
@@ -134,15 +137,16 @@ async function dropTask(id, status, prevId, nextId) {
     order = at + 1;
   }
   if (status === t.status && order === t.order) return;
-  const changes = status !== t.status ? [{ field: "Status", from: STATUS[t.status]?.label || t.status, to: STATUS[status].label }] : [];
+  const changes = status !== t.status ? [{ field: "Status", from: statusLabel(t.status, t.type), to: statusLabel(status, t.type) }] : [];
+  const extra = status === "done" && t.status !== "done" ? { resolvedAt: Date.now() } : {};
   // Show the move right away; the listener confirms it.
   Object.assign(t, { status, order });
   tasks.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   render();
-  const ok = await act(() => sub("tasks").doc(id).update({ status, order, updatedAt: Date.now() }));
+  const ok = await act(() => sub("tasks").doc(id).update({ status, order, ...extra, updatedAt: Date.now() }));
   if (ok && changes.length) {
     const done = status === "done";
     const type = t.type === "bug" ? (done ? "bug.fixed" : "bug.update") : (done ? "task.complete" : "task.update");
-    log(type, done ? (t.type === "bug" ? "fixed" : "completed") : `moved to ${STATUS[status].label}`, t.title, t.type === "bug" ? "Bugs" : "Tasks", { changes });
+    log(type, done ? (t.type === "bug" ? "fixed" : "completed") : `moved to ${statusLabel(status, t.type)}`, t.title, t.type === "bug" ? "Bugs" : "Tasks", { changes, ref: `task:${id}` });
   }
 }

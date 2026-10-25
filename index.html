@@ -15,6 +15,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="chat.css">
+  <link rel="stylesheet" href="bugs.css">
+  <link rel="stylesheet" href="feedback.css">
+  <link rel="stylesheet" href="analytics.css">
+  <link rel="stylesheet" href="docs.css">
+  <link rel="stylesheet" href="search.css">
 </head>
 <body>
   <div class="boot" id="boot-screen"><span class="logo">BLACKBOX</span></div>
@@ -72,6 +78,8 @@
         </div>
       </div>
 
+      <button type="button" class="side-search" id="search-btn" data-action="open-search" title="Search (Ctrl+K)"><span data-icon="search"></span><span class="grow">Search</span><kbd id="search-kbd">Ctrl K</kbd></button>
+
       <div class="side-section" id="project-picker">
         <div class="side-label">Project</div>
         <select id="project-select" aria-label="Project" data-cs-class="project-cs"></select>
@@ -81,9 +89,11 @@
         <a href="#overview" data-view="overview"><span data-icon="home"></span>Overview</a>
         <a href="#tasks" data-view="tasks"><span data-icon="check"></span>Tasks</a>
         <a href="#bugs" data-view="bugs"><span data-icon="bug"></span>Bugs</a>
+        <a href="#feedback" data-view="feedback"><span data-icon="inbox"></span>Feedback</a>
         <a href="#chat" data-view="chat"><span data-icon="chat"></span>Chat</a>
         <a href="#assets" data-view="assets"><span data-icon="images"></span>Assets</a>
-        <a href="#updates" data-view="updates"><span data-icon="rocket"></span>Updates</a>
+        <a href="#updates" data-view="updates"><span data-icon="history"></span>Updates</a>
+        <a href="#analytics" data-view="analytics"><span data-icon="chart"></span>Analytics</a>
         <a href="#activity" data-view="activity"><span data-icon="pulse"></span>Activity</a>
         <a href="#project" data-view="project"><span data-icon="sliders"></span>Project settings</a>
       </nav>
@@ -108,6 +118,7 @@
       <header class="mobile-top">
         <button class="icon-btn bare" id="menu-btn" title="Menu" aria-label="Open menu" data-icon="menu"></button>
         <span class="mobile-title ellipsis" id="mobile-title">BLACKBOX</span>
+        <button class="icon-btn bare" data-action="open-search" title="Search" data-icon="search"></button>
         <button class="icon-btn bare bell" data-action="toggle-notifs" title="Notifications" data-icon="bell"></button>
       </header>
       <div id="invites"></div>
@@ -128,13 +139,21 @@
   <div class="mention-picker" id="mention-picker" role="listbox" hidden></div>
   <input type="file" id="file-picker" hidden>
   <div class="toast" id="toast" role="status" hidden></div>
+  <div id="search-root"></div>
 
   <dialog id="task-dialog">
     <form method="dialog" id="task-form">
       <h2 id="task-dialog-title">New task</h2>
       <fieldset class="plain">
       <label>Title<input id="task-title" name="title" required maxlength="80"></label>
-      <label>Description<input id="task-desc" name="desc" maxlength="140"></label>
+      <label>Description<textarea id="task-desc" name="desc" rows="2" maxlength="2000"></textarea></label>
+      <div class="bug-only" hidden>
+        <label>Steps to reproduce<textarea id="bug-steps" name="steps" rows="4" maxlength="3000" placeholder="One step per line, e.g.&#10;Open the shop&#10;Buy the starter dice pack"></textarea></label>
+        <div class="form-grid">
+          <label>Expected result<textarea id="bug-expected" name="expected" rows="2" maxlength="1000" placeholder="What should happen"></textarea></label>
+          <label>Actual result<textarea id="bug-actual" name="actual" rows="2" maxlength="1000" placeholder="What happens instead"></textarea></label>
+        </div>
+      </div>
       <div class="form-grid">
         <label>Type
           <select id="task-type" name="type"><option value="task">Task</option><option value="bug">Bug</option></select>
@@ -151,7 +170,22 @@
             <option value="review">In review</option><option value="done">Done</option>
           </select>
         </label>
-        <label>Owner<select name="owner" id="task-owner"></select></label>
+        <label><span id="task-owner-label">Owner</span><select name="owner" id="task-owner"></select></label>
+      </div>
+      <div class="bug-only" hidden>
+        <div class="form-grid">
+          <label>Severity
+            <select id="bug-severity" name="severity"><option value="blocker">Blocker</option><option value="major" selected>Major</option><option value="minor">Minor</option><option value="trivial">Trivial</option></select>
+          </label>
+          <label>Frequency
+            <select id="bug-frequency" name="frequency"><option value="always">Always</option><option value="often">Often</option><option value="sometimes" selected>Sometimes</option><option value="rare">Rare</option></select>
+          </label>
+          <label>Platform<input id="bug-platform" name="platform" list="bug-platforms" maxlength="40" placeholder="Roblox, PC, iOS…" autocomplete="off"><datalist id="bug-platforms"></datalist></label>
+          <label>Device<input id="bug-device" name="device" maxlength="60" placeholder="iPhone 13, RTX 3060…" autocomplete="off"></label>
+          <label>Game version<input id="bug-version" name="gameVersion" maxlength="30" placeholder="1.4.2" autocomplete="off"></label>
+          <label>Reported by<select id="bug-reporter" name="reporter"></select></label>
+        </div>
+        <div class="bug-atts-field"><span class="field-label">Attachments <span class="muted small">screenshots, videos, logs</span></span><div id="bug-atts"></div></div>
       </div>
       </fieldset>
       <div class="dialog-actions">
@@ -218,6 +252,11 @@
   <script src="notify.js"></script>
   <script src="board.js"></script>
   <script src="updates.js"></script>
+  <script src="chat.js"></script>
+  <script src="bugs.js"></script>
+  <script src="feedback.js"></script>
+  <script src="analytics.js"></script>
+  <script src="search.js"></script>
   <script src="boot.js"></script>
 </body>
 </html>

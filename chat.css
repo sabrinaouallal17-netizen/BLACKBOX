@@ -1,0 +1,116 @@
+/* Chat v1.7: presence, typing indicator, reactions, pinned messages, videos and voice messages. */
+
+/* Presence dots on avatars */
+.pres-wrap { position: relative; display: inline-flex; flex: none; }
+.pres { position: absolute; right: -2px; bottom: -2px; width: 12px; height: 12px; border-radius: 50%; border: 2.5px solid var(--card); background: var(--faint); }
+.pres-online { background: var(--green); }
+.pres-away { background: var(--amber); }
+.pres-away::after { content: ""; position: absolute; width: 6px; height: 6px; border-radius: 50%; top: -1px; left: -1px; background: var(--card); }
+.pres-offline { background: var(--card); box-shadow: inset 0 0 0 2px var(--faint); }
+.pres-text { font-weight: 600; }
+.pres-text.pres-online { color: var(--green); }
+.pres-text.pres-away { color: var(--amber); }
+.pres-text.pres-offline { color: var(--muted); }
+.pres-label { margin-top: 14px; }
+.pres-label:first-child { margin-top: 0; }
+.chat-members .pres-group.offline li { opacity: 0.55; }
+.chat-members .pres-group.offline li:hover { opacity: 1; }
+
+/* Typing indicator: a thin line between the messages and the composer */
+.typing-line { display: flex; align-items: center; gap: 8px; min-height: 0; height: 0; padding: 0 18px; overflow: hidden; color: var(--muted); font-size: 12.5px; transition: height 0.15s ease; }
+.typing-line.on { height: 24px; }
+.typing-line b { color: var(--soft); font-weight: 600; }
+.typing-dots { display: inline-flex; gap: 3px; }
+.typing-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--soft); animation: typingDot 1.2s infinite ease-in-out; }
+.typing-dots i:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typingDot { 0%, 60%, 100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+
+/* Reactions */
+.reactions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.react-chip { position: relative; display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--border-2); background: var(--card-2); color: var(--soft); font: inherit; font-size: 13px; cursor: pointer; transition: background 0.12s, border-color 0.12s; }
+.react-chip:hover { background: var(--card-3); border-color: var(--faint); }
+.react-chip.mine { background: var(--accent-soft); border-color: rgba(167, 139, 250, 0.6); color: #e4dcff; }
+.react-chip .emoji { font-size: 15px; line-height: 1; }
+.react-chip .n { font-weight: 600; font-variant-numeric: tabular-nums; }
+.react-add { color: var(--muted); opacity: 0; }
+.msg:hover .react-add, .react-add:focus-visible { opacity: 1; }
+.react-who { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 20; display: none; align-items: center; gap: 10px; width: max-content; max-width: 260px; padding: 9px 12px; border-radius: 10px; background: #050508; border: 1px solid var(--border-2); color: var(--text); font-size: 12.5px; font-weight: 500; text-align: left; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5); pointer-events: none; }
+.react-who .big { font-size: 26px; line-height: 1; }
+.react-chip:hover .react-who, .react-chip:focus-visible .react-who { display: flex; }
+.react-picker { position: fixed; z-index: 120; display: grid; grid-template-columns: repeat(8, 38px); gap: 2px; padding: 8px; border-radius: 12px; background: var(--card-2); border: 1px solid var(--border-2); box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55); animation: pickerIn 0.12s ease-out; }
+.react-picker button { width: 38px; height: 38px; border: none; border-radius: 8px; background: transparent; font-size: 21px; cursor: pointer; transition: background 0.1s, transform 0.1s; }
+.react-picker button:hover, .react-picker button:focus-visible { background: var(--card-3); transform: scale(1.12); outline: none; }
+@keyframes pickerIn { from { opacity: 0; transform: translateY(4px); } }
+
+/* Pinned messages */
+.msg.pinned { background: rgba(139, 92, 246, 0.05); box-shadow: inset 2px 0 0 var(--accent-strong); }
+.msg.flash { animation: msgFlash 1.8s ease-out; }
+@keyframes msgFlash { 0%, 30% { background: rgba(139, 92, 246, 0.28); } 100% { background: transparent; } }
+.pinned-mark { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 2px; color: var(--accent); font-size: 12px; font-weight: 600; }
+.msg-actions .icon-btn.on { color: var(--accent); }
+.pins-btn { position: relative; }
+.pins-btn.on { color: var(--accent); background: var(--accent-soft); }
+.pins-count { position: absolute; top: 1px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent-strong); color: #fff; font-size: 10.5px; font-weight: 700; line-height: 16px; text-align: center; }
+.pins-panel { position: absolute; top: 56px; right: 12px; z-index: 25; width: min(420px, calc(100% - 24px)); max-height: min(520px, 70%); display: flex; flex-direction: column; border-radius: 14px; background: var(--card-2); border: 1px solid var(--border-2); box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55); animation: pickerIn 0.14s ease-out; }
+.pins-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--accent); }
+.pins-head b { color: var(--text); }
+.pins-list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; }
+.pin-item { display: flex; gap: 10px; padding: 10px; border-radius: 10px; }
+.pin-item:hover { background: var(--card-3); }
+.pin-body { flex: 1; min-width: 0; }
+.pin-body .msg-text { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.pin-meta { margin-top: 4px; }
+.pin-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.pins-empty { padding: 28px 20px; }
+.pins-empty p { margin: 4px 0; }
+
+/* Video attachments */
+.att-video-wrap { width: min(480px, 100%); }
+.att-video { width: 100%; max-height: 360px; border-radius: 10px; overflow: hidden; background: #000; border: 1px solid var(--border); }
+.att-video video { display: block; width: 100%; height: 100%; max-height: 360px; background: #000; }
+.atts.multi .att-video-wrap { grid-column: 1 / -1; }
+.media-wait { height: 100%; min-height: 120px; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--muted); font-size: 13px; }
+.media-wait svg { flex: none; }
+button.att-file { font: inherit; color: inherit; cursor: pointer; text-align: left; }
+button.att-file:hover { border-color: var(--border-2); background: var(--card-3); }
+.pend video { width: 100%; height: 100%; object-fit: cover; }
+.att-img.sending video { display: block; max-width: 260px; max-height: 200px; opacity: 0.6; }
+
+/* Voice messages */
+.voice { display: flex; align-items: center; gap: 10px; width: min(360px, 100%); padding: 8px 12px 8px 8px; border-radius: 22px; background: var(--card-2); border: 1px solid var(--border-2); }
+.voice-play { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; border: none; background: var(--accent-strong); color: #fff; cursor: pointer; transition: transform 0.12s, background 0.12s; }
+.voice-play:hover:not(:disabled) { background: #7c4dee; transform: scale(1.06); }
+.voice-play:disabled { background: var(--card-3); color: var(--muted); cursor: default; }
+.voice-play svg { margin-left: 1px; }
+.voice.playing .voice-play svg { margin-left: 0; }
+.voice-wave { flex: 1; min-width: 0; height: 32px; display: flex; align-items: center; gap: 2px; cursor: pointer; }
+.voice-wave i { flex: 1; min-width: 2px; max-width: 5px; border-radius: 2px; background: var(--faint); transition: background 0.15s; }
+.voice-wave i.on { background: var(--accent); }
+.voice-time { flex: none; min-width: 34px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+.mic-btn:hover { color: var(--accent); }
+
+/* Recorder (replaces the composer row) */
+.voice-rec { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 8px; border-radius: 12px; background: var(--panel); border: 1px solid var(--border-2); min-height: 52px; }
+.voice-rec.recording { border-color: rgba(248, 113, 113, 0.5); }
+.voice-rec .voice { flex: 1; width: auto; background: transparent; border: none; padding: 0; }
+.rec-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.6); animation: recPulse 1.2s infinite; }
+@keyframes recPulse { 70% { box-shadow: 0 0 0 8px rgba(248, 113, 113, 0); } 100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0); } }
+.voice-live-wrap { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; }
+.voice-timer { flex: none; color: var(--red); font-weight: 600; font-variant-numeric: tabular-nums; }
+.voice-live { flex: 1; min-width: 0; height: 30px; display: flex; align-items: center; justify-content: flex-end; gap: 2px; overflow: hidden; }
+.voice-live i { flex: none; width: 3px; border-radius: 2px; background: var(--red); opacity: 0.85; }
+.rec-max { flex: none; }
+
+@media (max-width: 640px) {
+  .msg-actions { top: -16px; }
+  .react-add { opacity: 1; }
+  .react-picker { grid-template-columns: repeat(6, 40px); }
+  .pins-panel { top: 52px; right: 8px; left: 8px; width: auto; }
+  .rec-max { display: none; }
+  .voice { width: 100%; }
+  .att-video-wrap { width: 100%; }
+}
+@media (hover: none) {
+  .react-add { opacity: 1; }
+}

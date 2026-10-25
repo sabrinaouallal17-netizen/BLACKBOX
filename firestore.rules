@@ -105,9 +105,56 @@ service cloud.firestore {
         allow delete: if isAdmin(project()) || (canEdit(project()) && resource.data.get('uid', '') == request.auth.uid);
       }
       // Patch notes: published ones are read by everyone; drafts and writing are for admins.
+      // Each update's pages (sheets) follow the update they belong to.
       match /updates/{updateId} {
         allow read: if isAdmin(project()) || (isMember(project()) && resource.data.status == 'published');
         allow write: if isAdmin(project());
+        match /sheets/{sheetId} {
+          allow read: if isAdmin(project()) || (isMember(project())
+            && get(/databases/$(database)/documents/projects/$(projectId)/updates/$(updateId)).data.status == 'published');
+          allow write: if isAdmin(project());
+        }
+      }
+      // Player feedback, entered by the team.
+      match /feedback/{feedbackId} {
+        allow read: if isMember(project());
+        allow create: if canEdit(project()) && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(project()) && keeps('createdBy');
+        allow delete: if isAdmin(project()) || (canEdit(project()) && resource.data.get('createdBy', '') == request.auth.uid);
+      }
+      // Analytics entries (CCU, revenue, new-user sources), entered by the team.
+      match /analytics/{entryId} {
+        allow read: if isMember(project());
+        allow create: if canEdit(project()) && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(project()) && keeps('createdBy');
+        allow delete: if isAdmin(project()) || (canEdit(project()) && resource.data.get('createdBy', '') == request.auth.uid);
+      }
+      // Comments on bugs, tasks and feedback: everyone in the project comments; authors edit theirs.
+      match /comments/{commentId} {
+        allow read: if isMember(project());
+        allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid;
+        allow update: if isMember(project()) && resource.data.uid == request.auth.uid && keeps('uid');
+        allow delete: if isMember(project()) && (resource.data.uid == request.auth.uid || isAdmin(project()));
+      }
+      // "Typing…" indicators: one document per person, written only by that person.
+      match /typing/{uid} {
+        allow read: if isMember(project());
+        allow write: if isMember(project()) && uid == request.auth.uid;
+      }
+      // Videos, voice messages and files, stored in chunks under 1 MB (no paid Storage needed).
+      match /files/{fileId} {
+        function fileOwner() {
+          return get(/databases/$(database)/documents/projects/$(projectId)/files/$(fileId)).data.uid;
+        }
+        allow read: if isMember(project());
+        allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid
+          && request.resource.data.size <= 26214400 && request.resource.data.chunks <= 30;
+        allow delete: if isMember(project()) && (resource.data.uid == request.auth.uid || isAdmin(project()));
+        match /chunks/{chunkId} {
+          allow read: if isMember(project());
+          allow create: if isMember(project()) && fileOwner() == request.auth.uid;
+          allow delete: if isMember(project()) && (isAdmin(project()) || fileOwner() == request.auth.uid);
+        }
       }
       match /activity/{entryId} {
         allow read: if isMember(project());
@@ -116,11 +163,18 @@ service cloud.firestore {
         allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid;
       }
       // Chat: everyone in the project (viewers too) writes; authors edit, authors and admins delete.
+      // Anyone in the project reacts (only the reactions map changes); members and up pin.
+      function reacts() {
+        return isMember(project()) && onlyChanged(['reactions']);
+      }
+      function pins() {
+        return canEdit(project()) && onlyChanged(['pinned', 'pinnedBy', 'pinnedAt']);
+      }
       match /messages/{messageId} {
         allow read: if isMember(project());
         allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid;
-        allow update: if isMember(project()) && resource.data.uid == request.auth.uid
-          && request.resource.data.uid == resource.data.uid;
+        allow update: if (isMember(project()) && resource.data.uid == request.auth.uid
+          && request.resource.data.uid == resource.data.uid) || reacts() || pins();
         allow delete: if isMember(project())
           && (resource.data.uid == request.auth.uid || isAdmin(project()));
       }
@@ -129,8 +183,8 @@ service cloud.firestore {
         allow read: if isMember(project());
         allow create: if isMember(project()) && request.resource.data.uid == request.auth.uid
           && channelId in project().get('channelIds', []);
-        allow update: if isMember(project()) && resource.data.uid == request.auth.uid
-          && request.resource.data.uid == resource.data.uid && channelId in project().get('channelIds', []);
+        allow update: if ((isMember(project()) && resource.data.uid == request.auth.uid
+          && request.resource.data.uid == resource.data.uid) || reacts() || pins()) && channelId in project().get('channelIds', []);
         allow delete: if isMember(project())
           && (resource.data.uid == request.auth.uid || isAdmin(project()));
       }

@@ -18,13 +18,19 @@ Une application pour gérer et planifier nos jeux en équipe : tâches, bugs, re
 - **Kanban** : vue Board pour les tâches et les bugs, cartes à glisser d'une colonne à l'autre (souris ou doigt)
 - **Updates** : patch notes du jeu (Nouveautés, Améliorations, Corrections, Équilibrage), pré-remplies avec les tâches terminées et les bugs corrigés
 - **Dossiers d'assets** et **téléchargement** des images (chat, aperçu, assets)
+- **Chat v1.7** : statut de présence (en ligne, absent, hors ligne), « X est en train d'écrire… », réactions emoji (compteur et liste des personnes), messages épinglés avec un panneau dédié, vidéos lues dans la conversation, messages vocaux (enregistrer, réécouter, envoyer)
+- **Feedback** : les retours des joueurs (auteur, source, date, catégorie, priorité, statut, images et vidéos), avec recherche, filtres et transformation en tâche ou en bug
+- **Rapports de bugs complets** : étapes pour reproduire, résultat attendu et observé, gravité, fréquence, plateforme, appareil, version, pièces jointes, commentaires, historique, liens ; statuts Open → In progress → To test → Resolved et Reopen
+- **Analytics** : CCU, revenus (Robux ou monnaie configurable dans les paramètres du projet) et sources des nouveaux joueurs (Others, Search, Friends), saisis par l'équipe, avec graphiques et filtres par période
+- **Updates** : éditeur de changelog façon Google Docs (titres, listes, checklists, liens, images, vidéos, tableaux, plusieurs pages), sauvegarde automatique, aperçu avant publication et historique des versions
+- **Recherche globale** (Ctrl+K / Cmd+K) : tâches, bugs, feedbacks, messages, documents et mises à jour
 - **Fluidité** : la page se met à jour sur place (bibliothèque [Idiomorph](https://github.com/bigskysoftware/idiomorph)), sans clignotement ; les messages apparaissent tout de suite pendant l'envoi
 - **What's new** : l'historique des versions de BLACKBOX, dans le panneau de notifications et le profil
 - **Application installable** : bouton **Install app** dans la barre latérale (Chrome, Edge, Android) ou **Partager → Sur l'écran d'accueil** sur iPhone ; fonctionne hors ligne une fois chargée
 - **Mobile** : barre du haut, onglets en bas, cartes de tâches, fenêtres en bas d'écran
 - **Sauvegarde** : tout est enregistré en ligne et partagé en temps réel ; l'indicateur en bas de la barre latérale affiche « All changes saved », « Saving… » ou « Offline ». Un texte en cours de saisie n'est pas effacé quand un coéquipier modifie quelque chose.
 
-Dans la version GitHub (Firebase), les images sont compressées et stockées dans la base (GIF jusqu'à 600 Ko), sans Firebase Storage, qui demande un abonnement payant. La version Artifact accepte des fichiers jusqu'à 20 Mo.
+Dans la version GitHub (Firebase), les images sont compressées et stockées dans la base (GIF jusqu'à 600 Ko), sans Firebase Storage, qui demande un abonnement payant. Les vidéos (25 Mo maximum), messages vocaux et autres fichiers (10 Mo) sont découpés en morceaux de moins de 1 Mo dans la base. Le forfait gratuit de Firebase offre 1 Go de stockage : pensez à supprimer les vieilles vidéos. La version Artifact accepte des fichiers jusqu'à 20 Mo.
 
 ## Mise en route (une seule fois, environ 5 minutes)
 
@@ -79,6 +85,8 @@ Les emails de confirmation n'existent pas dans l'émulateur ; leurs liens sont l
 PW=<chemin vers playwright> SDK=<chemin vers node_modules/firebase> OUT=/tmp node tests/e2e.js
 ```
 
+Chaque module a aussi son scénario : `tests/e2e-chat.js`, `tests/e2e-bugs.js`, `tests/e2e-feedback.js`, `tests/e2e-analytics.js`, `tests/e2e-updates.js`, `tests/e2e-search.js` (mêmes variables d'environnement).
+
 ## Fichiers
 
 - `index.html` : écrans (connexion, app, fenêtres)
@@ -86,7 +94,9 @@ PW=<chemin vers playwright> SDK=<chemin vers node_modules/firebase> OUT=/tmp nod
 - `app.js` : pages, actions et données (Firebase ou Artifact)
 - `ui.js` : menus, listes déroulantes, fenêtres, aperçu d'images, mise en forme du chat, images
 - `icons.js` : icônes de l'interface et des plateformes
-- `notify.js` : notifications et mentions ; `board.js` : Kanban ; `updates.js` : patch notes
+- `notify.js` : notifications et mentions ; `board.js` : Kanban ; `updates.js` : éditeur de changelog (Updates)
+- `chat.js` : présence, « en train d'écrire », réactions, messages épinglés, messages vocaux ; `bugs.js` : rapports de bugs, commentaires et liens ; `feedback.js` : Feedback ; `analytics.js` : Analytics ; `search.js` : recherche globale
+- Une feuille de style par module : `chat.css`, `bugs.css`, `feedback.css`, `analytics.css`, `docs.css`, `search.css`
 - `changelog.js` : What's new de BLACKBOX (à compléter à chaque changement) ; `boot.js` : démarrage
 - `firebase-config.js` : configuration du projet Firebase
 - `firestore.rules` : règles de sécurité de la base

@@ -1,7 +1,7 @@
 // BLACKBOX offline support: the app's own files are served from the network when online (so updates
 // arrive right away) and from the cache when offline. Firebase traffic is never cached here.
-const CACHE = "blackbox-v1.6";
-const SHELL = ["./", "index.html", "styles.css", "icons.js", "ui.js", "changelog.js", "app.js", "notify.js", "board.js", "updates.js", "boot.js", "firebase-config.js", "manifest.webmanifest", "icons/icon.svg", "icons/icon-192.png"];
+const CACHE = "blackbox-v1.7";
+const SHELL = ["./", "index.html", "styles.css", "icons.js", "ui.js", "changelog.js", "app.js", "notify.js", "board.js", "updates.js", "chat.js", "bugs.js", "feedback.js", "analytics.js", "search.js", "boot.js", "chat.css", "bugs.css", "feedback.css", "analytics.css", "docs.css", "search.css", "firebase-config.js", "manifest.webmanifest", "icons/icon.svg", "icons/icon-192.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

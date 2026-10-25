@@ -96,7 +96,12 @@ window.BLACKBOX_ARTIFACT = true;
       path: ref.path,
       collection: (p) => wrapCol(ref.collection(p)),
       get: async () => docSnap(await ref.get(), wrapDoc(ref)),
-      set: (data) => ref.set(data),
+      // set(data, { merge: true }) merges like Firestore; plain set replaces the document.
+      set: async (data, opts) => {
+        if (!opts?.merge) return ref.set(data);
+        const s = await ref.get();
+        return ref.set(applyUpdate(s.exists ? s.data() : {}, data));
+      },
       // The store's update() merges nested objects and cannot remove keys, so updates are
       // read-modify-write of the whole document (last writer wins, like the rest of the store).
       update: async (data) => {
@@ -140,6 +145,7 @@ window.BLACKBOX_ARTIFACT = true;
       const ops = [];
       return {
         update: (ref, data) => ops.push(() => ref.update(data)),
+        set: (ref, data, opts) => ops.push(() => ref.set(data, opts)),
         delete: (ref) => ops.push(() => ref.delete()),
         commit: async () => { for (const op of ops) await op(); },
       };

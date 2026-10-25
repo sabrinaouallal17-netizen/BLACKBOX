@@ -13,7 +13,7 @@ out = Path(sys.argv[1])
 html = (root / "index.html").read_text()
 css = (root / "styles.css").read_text()
 backend = (root / "artifact" / "backend.js").read_text()
-scripts = {name: (root / name).read_text() for name in ("icons.js", "ui.js", "changelog.js", "app.js", "notify.js", "board.js", "updates.js", "boot.js")}
+scripts = {name: (root / name).read_text() for name in ("icons.js", "ui.js", "changelog.js", "app.js", "notify.js", "board.js", "updates.js", "chat.js", "bugs.js", "feedback.js", "analytics.js", "search.js", "boot.js")}
 
 
 def inline_script(code):
@@ -21,6 +21,9 @@ def inline_script(code):
 
 
 html = html.replace('<link rel="stylesheet" href="styles.css">', f"<style>\n{css}</style>")
+# Each feature module has its own stylesheet.
+html = re.sub(r'<link rel="stylesheet" href="([a-z-]+\.css)">', lambda m: "<style>\n" + (root / m.group(1)).read_text() + "</style>", html)
+assert "stylesheet\" href=\"" not in html.replace("fonts.googleapis", ""), "a stylesheet was not inlined"
 firebase_scripts = re.compile(r'\s*<script src="https://www\.gstatic\.com/firebasejs/[^"]+"></script>')
 assert len(firebase_scripts.findall(html)) == 3, "expected the three Firebase SDK scripts"
 html = firebase_scripts.sub("", html)
