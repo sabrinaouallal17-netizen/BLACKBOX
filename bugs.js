@@ -66,6 +66,15 @@ onProjectReset(() => {
 });
 
 /* ---------- Small fragments ---------- */
+// Like mapLimit (ui.js), but returns the results in order.
+async function mapResults(list, limit, fn) {
+  const out = new Array(list.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, list.length) }, async () => {
+    while (next < list.length) { const i = next++; out[i] = await fn(list[i]); }
+  }));
+  return out;
+}
 const severityBadge = (s, small = false) => BUG_SEVERITY[s]
   ? `<span class="sev sev-${esc(s)} ${small ? "small" : ""}" title="Severity: ${BUG_SEVERITY[s].label}">${icon(BUG_SEVERITY[s].icon, small ? 12 : 14, 2.2)}${BUG_SEVERITY[s].label}</span>` : "";
 const frequencyBadge = (f) => BUG_FREQUENCY[f] ? `<span class="freq" title="Frequency">${icon("repeat", 14)}${BUG_FREQUENCY[f].label}</span>` : "";
@@ -211,7 +220,7 @@ async function bugFormData(data, editId) {
   btn.disabled = true;
   btn.textContent = "Uploading…";
   renderBugAtts();
-  const ups = await act(() => mapLimit(bugForm.pending, 2, (p) => storeFile(p.file, "bug")));
+  const ups = await act(() => mapResults(bugForm.pending, 2, (p) => storeFile(p.file, "bug")));
   bugForm.busy = false;
   btn.disabled = false;
   btn.textContent = "Save";
@@ -427,7 +436,7 @@ async function sendComment(form) {
   cmSending[target] = true;
   render();
   const ok = await act(async () => {
-    const attachments = pend.length ? await mapLimit(pend, 2, (p) => storeFile(p.file, "comment")) : [];
+    const attachments = pend.length ? await mapResults(pend, 2, (p) => storeFile(p.file, "comment")) : [];
     const doc = { target, text, uid: user.uid, name: storedName(), at: Date.now() };
     if (attachments.length) doc.attachments = attachments;
     await sub("comments").add(doc);
@@ -537,7 +546,7 @@ FILE_TARGETS["bug-add-files"] = async (files, opts = {}) => {
   if (!t) return;
   const room = 20 - (t.attachments || []).length;
   if (room <= 0) return toast("A bug can have up to 20 attachments.", true);
-  const ups = await act(() => mapLimit(files.slice(0, room), 2, (f) => storeFile(f, "bug")));
+  const ups = await act(() => mapResults(files.slice(0, room), 2, (f) => storeFile(f, "bug")));
   if (!ups) return;
   const fresh = tasks.find((x) => x.id === id) || t;
   const next = [...(fresh.attachments || []), ...ups];

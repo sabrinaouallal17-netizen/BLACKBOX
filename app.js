@@ -966,6 +966,8 @@ function attachmentsHtml(list) {
   if (!list?.length) return "";
   return `<div class="atts ${list.length > 1 ? "multi" : ""}">${list.map((a) => mediaKind(a.type) === "audio" ? voiceHtml(a)
     : mediaKind(a.type) === "video" ? videoHtml(a)
+    : isStoredFile(a.url) && isImageType(a.type) && mediaSrc(a.url) ? `<div class="att-wrap"><button type="button" class="att-img" data-lightbox="${msrc(a.url)}" data-caption="${esc(a.name)}"><img src="${msrc(a.url)}" alt="${esc(a.name)}" ${a.width ? `width="${a.width}" height="${a.height}"` : ""}></button>
+       <button type="button" class="att-dl" data-download="${esc(a.url)}" data-name="${esc(a.name)}" title="Download">${icon("download", 16)}</button></div>`
     : isStoredFile(a.url) ? `<button type="button" class="att-file" data-download="${esc(a.url)}" data-name="${esc(a.name)}">${icon("file", 22)}<span><b class="ellipsis">${esc(a.name)}</b><span class="muted small">${formatSize(a.size)}</span></span>${icon("download", 16)}</button>`
     : isImageType(a.type) && safeUrl(a.url)
     ? `<div class="att-wrap"><button type="button" class="att-img" data-lightbox="${src(a.url)}" data-caption="${esc(a.name)}"><img src="${src(a.url)}" alt="${esc(a.name)}" loading="lazy" decoding="async" ${a.width ? `width="${a.width}" height="${a.height}"` : ""}></button>

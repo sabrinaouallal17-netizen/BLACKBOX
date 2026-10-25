@@ -134,7 +134,7 @@ const bug = (page, id) => page.evaluate((id) => { const t = tasks.find((x) => x.
   ok(await A.locator('#bug-atts .bug-att').count() === 1, 'pending attachment removed');
   await A.screenshot({ path: OUT + '/bug-form.png' });
   await A.click('#task-form button[type=submit]');
-  await A.waitForSelector('#task-dialog:not([open])');
+  await A.waitForSelector('#task-dialog[open]', { state: 'detached' });
   await A.waitForSelector('tbody tr:has-text("Dice freeze after rolling")');
   const id = await A.evaluate(() => tasks.find((t) => t.title === 'Dice freeze after rolling').id);
   const bobUid = await B.evaluate(() => user.uid);

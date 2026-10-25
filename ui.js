@@ -13,6 +13,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function safeUrl(u) {
   const s = String(u || "").trim();
   if (/^\/_blob\/[A-Za-z0-9_.~-]+$/.test(s)) return s;
+  // Local copies of stored files (videos, voice, large images) made by this page.
+  if (s.startsWith(`blob:${location.origin}/`) && /^blob:[^\s"'<>()\\]+$/.test(s)) return s;
   if (/^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=]+$/i.test(s)) return s;
   if (/^https:\/\/[^\s"'<>()\\]+$/i.test(s)) return s;
   return "";

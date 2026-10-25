@@ -288,7 +288,7 @@ const TB = (cmd, ic, title, extra = "") => `<button type="button" class="tb-btn"
 function toolbarHtml() {
   return `<div class="doc-toolbar" id="doc-toolbar" data-live role="toolbar" aria-label="Formatting">
     ${TB("undo", "undo", "Undo (Ctrl+Z)")}${TB("redo", "redo", "Redo (Ctrl+Y)")}<span class="tb-sep"></span>
-    <button type="button" class="tb-btn tb-block" data-doc-cmd="blockmenu" title="Text style" data-live><span data-keep="doc-block-label">Paragraph</span>${icon("chevron", 14)}</button><span class="tb-sep"></span>
+    <button type="button" class="tb-btn tb-block" data-doc-cmd="blockmenu" data-menu-key="doc-block" title="Text style" data-live><span data-keep="doc-block-label">Paragraph</span>${icon("chevron", 14)}</button><span class="tb-sep"></span>
     ${TB("bold", "bold", "Bold (Ctrl+B)")}${TB("italic", "italic", "Italic (Ctrl+I)")}${TB("underline", "underline", "Underline (Ctrl+U)")}${TB("strikeThrough", "strike", "Strikethrough")}<span class="tb-sep"></span>
     ${TB("link", "link", "Link (Ctrl+K)")}${TB("unlink", "unlink", "Remove link")}<span class="tb-sep"></span>
     ${TB("ul", "list", "Bulleted list")}${TB("ol", "listOrdered", "Numbered list")}${TB("checklist", "checklist", "Checklist")}<span class="tb-sep"></span>

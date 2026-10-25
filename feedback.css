@@ -36,11 +36,13 @@
 
 /* Detail */
 .fb-detail { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 22px; align-items: start; }
-.fb-body { padding-top: 20px; display: grid; gap: 18px; }
+.fb-body { padding-top: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+.fb-body > * { min-width: 0; }
+.fb-atts .att-wrap, .fb-atts .att-video, .fb-atts video { max-width: 100%; }
 .fb-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; color: #e2e2ea; font-size: 14.5px; }
 .fb-atts { display: grid; gap: 10px; border-radius: 12px; }
 .fb-atts.drop-active { outline: 2px dashed var(--accent); outline-offset: 6px; }
-.fb-atts .atts { max-width: 640px; }
+.fb-atts .atts { max-width: min(640px, 100%); }
 .fb-drop { margin: 0; padding: 18px; gap: 4px; width: 100%; background: none; font: inherit; }
 .fb-actions { border-top: 1px solid var(--border); padding-top: 14px; }
 .fb-dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px 16px; margin: 0; font-size: 13.5px; }
